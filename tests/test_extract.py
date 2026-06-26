@@ -77,3 +77,23 @@ def test_cleaned_chunk_offset_still_points_at_raw_line(tmp_path):
     with open(path, "rb") as f:
         raw = f.read()[c.byte_offset:c.byte_offset + c.byte_len]
     assert json.loads(raw)["uuid"] == c.uuid
+
+
+def test_project_derived_from_cwd_collapses_worktree(tmp_path):
+    # project must come from the turn's cwd (worktree -> repo name), NOT the junk
+    # folder-derived fallback. Fixes the worktree->hash / self-edu->edu bug.
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps({
+        "type": "user", "uuid": "u1", "sessionId": "sx",
+        "cwd": "/Users/me/myrepo/.claude/worktrees/wt-1",
+        "message": {"role": "user", "content": "a real question"},
+    }) + "\n")
+    chunks = extract_file(str(p), project="JUNK-FALLBACK")
+    assert chunks and chunks[0].project == "myrepo"
+
+
+def test_project_falls_back_when_no_cwd(tmp_path):
+    # a turn without cwd keeps the passed (folder-derived) project
+    path = _write_user_jsonl(tmp_path, "hi there")  # _write_user_jsonl sets no cwd
+    chunks = extract_file(path, project="folderproj")
+    assert chunks and chunks[0].project == "folderproj"

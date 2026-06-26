@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime
 from .models import Chunk
+from .scope import project_label
 
 # Bump when extraction logic changes -> baked into the per-file index signature so
 # stale files are re-extracted on the next index run. v2 = harness-boilerplate filter.
@@ -48,13 +49,14 @@ def _ts(obj) -> int:
         return 0
 
 def _mk(obj, project, role, text, offset, length, turn_index) -> Chunk:
+    cwd = obj.get("cwd", "")
     return Chunk(
         session_id=obj.get("sessionId", ""),
         uuid=obj.get("uuid", ""),
         role=role,
         text=text,
-        project=project,
-        cwd=obj.get("cwd", ""),
+        project=project_label(cwd) or project,
+        cwd=cwd,
         git_branch=obj.get("gitBranch", ""),
         ts=_ts(obj),
         file_path="",  # filled by caller-aware path below

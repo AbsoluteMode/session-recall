@@ -1,53 +1,61 @@
 # session-recall
 
-Локальный агентный semantic-recall по истории сессий **Claude Code**. Даёт агенту
-четыре инструмента (через MCP):
+Local, agentic **semantic recall over your Claude Code session history**. It gives the
+agent four tools (via MCP) so it can resume past work instead of making you re-explain it:
 
-- `recall_search(query)` — найти прошлое обсуждение **по смыслу** (не по подстроке).
-- `expand_around(session_id, uuid)` — «курсор» в детали сырого турна (tool-вызовы, выводы, thinking).
-- `step(session_id, uuid, direction)` — соседний турн (дешёвый шаг курсора).
-- `grep(pattern)` — подстрочный скан по сырым транскриптам on-demand.
+- `recall_search(query)` — find a past discussion **by meaning** (not substring).
+- `expand_around(session_id, uuid)` — a cursor into the raw turn (tool calls, outputs, thinking).
+- `step(session_id, uuid, direction)` — move to an adjacent turn (cheap cursor step).
+- `grep(pattern)` — on-demand substring scan over the raw transcripts.
 
-On-demand (без проактивного авто-инжекта в v1). Локально, open source.
+On-demand (no proactive auto-injection in v1). Local, open source.
 
-**Статус:** v1 собран и проверён на реальной истории. Обоснования ключевых
-решений — см. [docs/decisions/](docs/decisions/).
+`recall_search` and `grep` also take an optional `scope_cwd` — pass your current working
+directory to scope results to the current repo (worktrees collapse to the repo root);
+omit it for cross-project recall.
 
-## Как работает (кратко)
+**Status:** v1, built and validated on real history. Key design rationale lives in
+[docs/decisions/](docs/decisions/).
 
-Индексируется только «поверхность» разговора — промпты пользователя и текстовые
-ответы ассистента; `tool_result` / `thinking` / служебка не эмбеддятся, но
-доступны через `expand_around` / `grep`. Эмбеддинги Voyage `voyage-4-large`
-(dim 1024) → SQLite (`sqlite-vec` KNN + FTS5) → Voyage `rerank-2.5` → top-k.
-Индексация инкрементальная (по mtime+size). Сабагентские сайдчейны
-(`<session>/subagents/`) намеренно пропускаются — это «под капотом», не разговор.
+## How it works
 
-## Установка / запуск
+Only the conversation "surface" is indexed — user prompts and assistant text replies.
+`tool_result` / `thinking` / harness noise are not embedded but stay reachable via
+`expand_around` / `grep`. Embeddings: Voyage `voyage-4-large` (dim 1024) → SQLite
+(`sqlite-vec` KNN + FTS5) → Voyage `rerank-2.5` → top-k. Indexing is incremental
+(by mtime+size). Subagent sidechains (`<session>/subagents/`) are intentionally skipped —
+that's under-the-hood tooling, not conversation.
+
+Embeddings are pluggable (Voyage is the default); the reranker is optional, and the
+system degrades gracefully to KNN + FTS without one.
+
+## Install / run
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
-export VOYAGE_API_KEY=...                      # ключ Voyage
+export VOYAGE_API_KEY=...                        # your Voyage key
 
-.venv/bin/session-recall index                 # проиндексировать ~/.claude/projects
-.venv/bin/session-recall search "запрос"        # семантический поиск из CLI
+.venv/bin/session-recall index                   # index ~/.claude/projects
+.venv/bin/session-recall search "query"          # semantic search from the CLI
 ```
 
-### Подключить к Claude Code (MCP)
+### Connect to Claude Code (MCP)
 
 ```bash
 claude mcp add session-recall --scope user -- \
-  /абсолютный/путь/.venv/bin/python -m session_recall.server
+  /absolute/path/.venv/bin/python -m session_recall.server
 ```
 
-Сервер читает `VOYAGE_API_KEY` из env; тулы (`recall_search` и др.) станут
-доступны агенту в новых сессиях. Проверка: `claude mcp list` → `✔ Connected`.
+The server reads `VOYAGE_API_KEY` from the environment; the tools (`recall_search` and
+friends) become available to the agent in new sessions. Verify with
+`claude mcp list` → `✔ Connected`.
 
-## Свежесть индекса
+## Keeping the index fresh
 
-Индексация инкрементальная (пропускает уже проиндексированное по сигнатуре файла),
-поэтому держать индекс свежим дёшево. Самый прямой путь — хук Claude Code на
-`SessionStart`, который запускает `session-recall index` в фоне при старте каждой
-сессии. В `~/.claude/settings.json`:
+Indexing is incremental (it skips already-indexed files by signature), so staying fresh is
+cheap. The most direct way is a Claude Code `SessionStart` hook that runs
+`session-recall index` in the background at the start of each session. In
+`~/.claude/settings.json`:
 
 ```json
 "hooks": {
@@ -55,21 +63,21 @@ claude mcp add session-recall --scope user -- \
     { "hooks": [ {
       "type": "command",
       "async": true,
-      "command": "pgrep -f 'session-recall index' >/dev/null 2>&1 || (VOYAGE_API_KEY=... /абс/путь/.venv/bin/session-recall index >/tmp/sr-index.log 2>&1 &)"
+      "command": "pgrep -f 'session-recall index' >/dev/null 2>&1 || (VOYAGE_API_KEY=... /abs/path/.venv/bin/session-recall index >/tmp/sr-index.log 2>&1 &)"
     } ] }
   ]
 }
 ```
 
-`pgrep`-guard не даёт запускам наслаиваться; `( … & )` детачит, чтобы старт сессии не
-ждал. Альтернатива — `launchd`/cron-таймер. (Локально на одной машине этого достаточно;
-серверный индекс осмыслен только для нескольких машин — ценой приватности и сети.)
+The `pgrep` guard prevents overlapping runs; `( … & )` detaches so session start doesn't
+wait. A `launchd`/cron timer works too. (Local on one machine is enough; a server-side
+index only makes sense across several machines — at the cost of privacy and network.)
 
-## ⚠️ Приватность — жёсткий инвариант
+## Privacy — hard invariant
 
-Это (будущий) публичный репозиторий. В него попадает **только код**.
+This is a public repository. **Only code goes in it.**
 
-- Данные, индексы, сырые транскрипты, эмбеддинги → `~/.local/share/session-recall/`,
-  **вне дерева репозитория**. Их физически нельзя закоммитить.
-- API-ключи → только через env (`VOYAGE_API_KEY`); `.gitignore` блокирует `.env`.
-- Тесты → только синтетические фикстуры, ни одного реального куска сессий.
+- Data, indexes, raw transcripts, embeddings → `~/.local/share/session-recall/`,
+  **outside the repo tree**. They physically cannot be committed.
+- API keys → environment only (`VOYAGE_API_KEY`); `.gitignore` blocks `.env`.
+- Tests → synthetic fixtures only, never a real slice of a session.

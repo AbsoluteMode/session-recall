@@ -10,6 +10,7 @@ scope — `project`-name derivation can't (it yields a junk hash per worktree).
 
 # WHY: docs/decisions/2026-06-26-recall-project-scope.md
 """
+import os
 import re
 
 # Trailing `/.claude/worktrees/<name>` (optionally slash-terminated). Segment-
@@ -43,3 +44,11 @@ def scope_clause(column: str, root: str | None) -> tuple[str, list[str]]:
     escaped = root.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
     sql = f"({column} = ? OR {column} LIKE ? ESCAPE '\\')"
     return sql, [root, escaped + "/%"]
+
+
+def project_label(cwd: str) -> str:
+    """Human-readable project label: basename of the repo root (worktrees
+    collapsed to the parent repo). Fixes a worktree cwd resolving to a junk
+    hash (or `self-edu` -> `edu`). Empty cwd -> empty string.
+    """
+    return os.path.basename(repo_root(cwd))
