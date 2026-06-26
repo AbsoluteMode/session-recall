@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────
+# LEAK-PROOF: в публичный репо попадает ТОЛЬКО код.
+# Данные/индексы/сырьё/ключи живут ВНЕ дерева (~/.local/share/session-recall/).
+# Это второй рубеж на случай, если что-то окажется внутри дерева.
+# ─────────────────────────────────────────────────────────────
+
+# сырые сессии и любые транскрипты
+*.jsonl
+!tests/fixtures/*.jsonl   # синтетические фикстуры — ТОЛЬКО рукотворные, НИКОГДА реальные сессии
+
+# индексы / эмбеддинги / БД
+*.sqlite
+*.sqlite3
+*.db
+*.faiss
+*.lance
+*.lance/
+/data/
+/index/
+/embeddings/
+chroma/
+
+# секреты
+.env
+.env.*
+!.env.example
+*.key
+secrets/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# node (если стек окажется TS)
+node_modules/
+
+# os / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# SDD scratch ledger
+.superpowers/

@@ -1,0 +1,17 @@
+{
+  "description": "Keep the session-recall index fresh — incremental re-index in the background at session start.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "timeout": 10,
+            "command": "pgrep -f 'session-recall index' >/dev/null 2>&1 || (session-recall index >/tmp/session-recall-index.log 2>&1 &)"
+          }
+        ]
+      }
+    ]
+  }
+}

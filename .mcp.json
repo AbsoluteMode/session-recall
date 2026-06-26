@@ -1,0 +1,6 @@
+{
+  "session-recall": {
+    "command": "session-recall-mcp",
+    "args": []
+  }
+}

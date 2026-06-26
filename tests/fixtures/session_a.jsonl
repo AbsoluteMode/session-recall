@@ -1,0 +1,5 @@
+{"type":"user","uuid":"u1","sessionId":"sa","timestamp":"2026-06-01T10:00:00Z","cwd":"/proj","gitBranch":"main","message":{"role":"user","content":"how do we cache embeddings"}}
+{"type":"assistant","uuid":"a1","sessionId":"sa","timestamp":"2026-06-01T10:00:05Z","cwd":"/proj","gitBranch":"main","message":{"role":"assistant","content":[{"type":"thinking","thinking":"secret reasoning"},{"type":"text","text":"We cache via an on-disk store."}]}}
+{"type":"user","uuid":"u2","sessionId":"sa","timestamp":"2026-06-01T10:00:06Z","cwd":"/proj","gitBranch":"main","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"tool output not human"}]}}
+{"type":"queue-operation","uuid":"q1","sessionId":"sa"}
+{"type":"assistant","uuid":"a2","sessionId":"sa","timestamp":"2026-06-01T10:00:10Z","cwd":"/proj","gitBranch":"main","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"bash","input":{"command":"ls"}}]}}

@@ -1,0 +1,10 @@
+{
+  "name": "session-recall-marketplace",
+  "owner": { "name": "max" },
+  "plugins": [
+    {
+      "name": "session-recall",
+      "source": "./"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[project]
+name = "session-recall"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlite-vec==0.1.9",
+    "voyageai>=0.3.0",
+    "mcp>=1.2.0",
+    "pysqlite3>=0.6.0; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-mock>=3.12"]
+openai = ["openai>=1.0"]
+
+[project.scripts]
+session-recall = "session_recall.cli:main"
+session-recall-mcp = "session_recall.server:main"
+
+[tool.pytest.ini_options]
+markers = ["live: hits real Voyage API (needs VOYAGE_API_KEY); excluded by default"]
+addopts = "-m 'not live'"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

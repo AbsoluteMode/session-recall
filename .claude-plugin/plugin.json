@@ -1,0 +1,6 @@
+{
+  "name": "session-recall",
+  "version": "0.1.0",
+  "description": "Semantic recall over your Claude Code session history — resume past tasks instantly. Bundles the MCP search tools, a Sonnet retrieval subagent (deep search in its own context, clean brief back), a trigger skill, and a background freshness hook.",
+  "author": { "name": "max" }
+}
