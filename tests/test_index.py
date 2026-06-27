@@ -35,6 +35,40 @@ def test_changed_file_reindexes(tmp_path):
     store.close()
 
 
+def test_index_prunes_chunks_for_deleted_transcripts(tmp_path):
+    """A transcript indexed once, then deleted from disk, must have its chunks
+    pruned on the next index run. index_corpus only walks EXISTING files, so a
+    deleted file is never re-visited — without an explicit prune its chunks would
+    linger forever, polluting recall_search (and, pre-resilience, crashing grep)."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    keep = proj / "keep.jsonl"
+    keep.write_text('{"type":"user","uuid":"u1","sessionId":"sa",'
+                    '"message":{"role":"user","content":"alpha survives"}}\n')
+    gone = proj / "gone.jsonl"
+    gone.write_text('{"type":"user","uuid":"u2","sessionId":"sb",'
+                    '"message":{"role":"user","content":"beta removed"}}\n')
+    store = Store(tmp_path / "p.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")
+    assert store.db.execute("SELECT count(*) FROM chunks WHERE file_path = ?",
+                            (str(gone),)).fetchone()[0] == 1  # indexed
+
+    gone.unlink()  # session cleaned up after indexing
+    index_corpus(store, emb, tmp_path / "projects")
+
+    assert store.db.execute("SELECT count(*) FROM chunks WHERE file_path = ?",
+                            (str(gone),)).fetchone()[0] == 0, "deleted file's chunks not pruned"
+    assert store.db.execute("SELECT count(*) FROM chunks WHERE file_path = ?",
+                            (str(keep),)).fetchone()[0] == 1, "live file's chunks wrongly removed"
+    assert store.db.execute("SELECT count(*) FROM indexed_files WHERE path = ?",
+                            (str(gone),)).fetchone()[0] == 0, "indexed_files row for deleted file left behind"
+    # vec/fts stay in sync with chunks (no orphan rows)
+    assert store.db.execute("SELECT count(*) FROM vec_chunks").fetchone()[0] == 1
+    assert store.db.execute("SELECT count(*) FROM fts_chunks").fetchone()[0] == 1
+    store.close()
+
+
 def test_reindex_changed_file_does_not_accumulate_duplicate_rows(tmp_path):
     """Delete-before-reinsert: a growing transcript re-indexed must NOT leave the
     old chunks behind. The DB must hold only the current file's chunks (3), not 5."""

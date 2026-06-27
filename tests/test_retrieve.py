@@ -185,6 +185,29 @@ def test_grep_scoped_to_repo(tmp_path):
     store.close()
 
 
+def test_grep_skips_missing_files_global(tmp_path):
+    """Regression: a transcript indexed earlier but later DELETED from disk must
+    not crash a global grep. grep iterates every indexed file_path; one missing
+    file (FileNotFoundError on open) previously aborted the whole scan. The dead
+    file must be skipped and live files still scanned. (Real-world trigger: a
+    session under ~/.claude/projects was cleaned up after indexing — its chunks
+    linger in the DB pointing at a path that no longer exists.)"""
+    live = tmp_path / "live.jsonl"
+    live.write_text('{"type":"user","uuid":"u1","sessionId":"sa",'
+                    '"message":{"role":"user","content":"needle here"}}\n')
+    gone = tmp_path / "gone.jsonl"  # indexed once, never created on disk now
+    store = Store(tmp_path / "g.db")
+    store.add(*_scoped_chunk("u1", "needle here", "/Users/me/repoA", 0,
+                             file_path=str(live), session_id="sa"))
+    store.add(*_scoped_chunk("u2", "needle here", "/Users/me/repoB", 1,
+                             file_path=str(gone), session_id="sb"))
+    r = Recall(store, FakeEmbedder(), FakeReranker())
+    hits = r.grep("needle")  # global: touches BOTH the live file and the deleted one
+    assert hits and all(h.session_id == "sa" for h in hits), \
+        "grep should return live hits and skip the deleted transcript, not crash"
+    store.close()
+
+
 def test_recall_collapses_identical_content_across_sessions(tmp_path):
     """Two chunks with identical text (same content_hash) from different sessions
     must collapse to ONE result — identical text never wastes two top-k slots.

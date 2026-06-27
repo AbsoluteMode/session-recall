@@ -77,13 +77,21 @@ class Recall:
         return out
 
     def _read_turns(self, file_path: str) -> list[dict]:
-        turns = []
-        with open(file_path, "rb") as f:
-            for raw in f:
-                try:
-                    turns.append(json.loads(raw))
-                except json.JSONDecodeError:
-                    continue
+        turns: list[dict] = []
+        try:
+            with open(file_path, "rb") as f:
+                for raw in f:
+                    try:
+                        turns.append(json.loads(raw))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            # The transcript was deleted/moved/made-unreadable since indexing. A
+            # global grep touches EVERY indexed path, so one vanished file must not
+            # abort the whole scan; expand_around/step degrade to [] (consistent
+            # with their existing uuid-not-found path). WHY:
+            # docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md
+            return []
         return turns
 
     def _file_for(self, uuid: str) -> str:

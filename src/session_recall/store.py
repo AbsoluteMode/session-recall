@@ -62,6 +62,20 @@ class Store:
             self.db.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
         self.db.commit()
 
+    def prune_deleted(self) -> int:
+        """Drop index rows for transcripts that no longer exist on disk. A deleted
+        file is never re-visited by index_corpus (it only walks existing files), so
+        without this its chunks linger forever — polluting recall_search results and
+        (pre-resilience) crashing grep on open(). Returns the number of files pruned.
+        WHY: docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md"""
+        gone = [r[0] for r in self.db.execute("SELECT path FROM indexed_files").fetchall()
+                if not Path(r[0]).exists()]
+        for path in gone:
+            self.delete_file(path)  # chunks + vec + fts
+            self.db.execute("DELETE FROM indexed_files WHERE path = ?", (path,))
+        self.db.commit()
+        return len(gone)
+
     def knn(self, query_vec: list[float], n: int, scope_root: str | None = None) -> list[tuple[int, float]]:
         clause, params = scope_clause("c.cwd", scope_root)
         if not clause:
