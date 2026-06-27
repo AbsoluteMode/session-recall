@@ -1,18 +1,20 @@
 # session-recall
 
 Local, agentic **semantic recall over your Claude Code session history**. It gives the
-agent four tools (via MCP) so it can resume past work instead of making you re-explain it:
+agent five tools (via MCP) so it can resume past work instead of making you re-explain it:
 
 - `recall_search(query)` — find a past discussion **by meaning** (not substring).
 - `expand_around(session_id, uuid)` — a cursor into the raw turn (tool calls, outputs, thinking).
 - `step(session_id, uuid, direction)` — move to an adjacent turn (cheap cursor step).
 - `grep(pattern)` — on-demand substring scan over the raw transcripts.
+- `recent_sessions()` — the freshest past sessions first (what's current, how fresh the index is).
 
 On-demand (no proactive auto-injection in v1). Local, open source.
 
-`recall_search` and `grep` also take an optional `scope_cwd` — pass your current working
-directory to scope results to the current repo (worktrees collapse to the repo root);
-omit it for cross-project recall.
+`recall_search`, `grep` and `recent_sessions` also take an optional `scope_cwd` — pass your
+current working directory to scope results to the current repo (worktrees collapse to the repo
+root); omit it for cross-project recall. Ranked hits carry a human-readable `when_human`
+timestamp alongside the raw epoch.
 
 **Status:** v1, built and validated on real history. Key design rationale lives in
 [docs/decisions/](docs/decisions/).

@@ -1,45 +1,45 @@
-# session-recall остаётся tool-based и простым (дистилляцию отвергли)
+# session-recall stays tool-based and simple (distillation rejected)
 
-**Дата:** 2026-06-26
+**Date:** 2026-06-26
 
-## Контекст
+## Context
 
-Цель: память, чтобы Claude Code, начав сессию и получив задачу, которую мы уже
-проходили, МГНОВЕННО вникал в контекст самым прямым путём — **через tool, не
-ambient**. Я предложил тяжёлый план: два прототипа (A — дистиллированные «брифы
-задач», B — «умная дуга») + бейк-офф. Максим затормозил: «становится слишком
-сложно; я думал, мы просто векторизируем запросы+ответы и работаем над этим».
+Goal: a memory so that Claude Code, when it starts a session and gets a task we've already
+worked through, INSTANTLY gets up to speed by the most direct path — **via a tool, not
+ambient**. I proposed a heavy plan: two prototypes (A — distilled "task
+briefs", B — "smart arc") + a bake-off. Maxim hit the brakes: "this is getting too
+complicated; I thought we'd just vectorize queries+answers and work on that."
 
-## Решение
+## Decision
 
-Остаёмся на текущем tool-based v1 (векторизация surface = промпты юзера + текстовые
-ответы ассистента) + точечные фиксы. Дистилляцию / бейк-офф / ambient НЕ строим.
+Stay on the current tool-based v1 (vectorize surface = user prompts + the assistant's text
+answers) + targeted fixes. We do NOT build distillation / bake-off / ambient.
 
-## Почему (доказано живым тестом на MCP-тулах)
+## Why (proven by a live test on the MCP tools)
 
-- Сыграли реальный «возобнови задачу» (Drop silent-loss) на живых тулах: `recall`
-  нашёл правильную окрестность; нырок `expand_around` в «Итог»-турн отдал готовый
-  бриф — решение + почему + статус + что осталось.
-- **Брифы УЖЕ существуют** в данных, что мы векторизируем — как прошлые «Итог»-ответы
-  ассистента. Отдельный дистилляционный слой не нужен.
-- Реальным блокером был БАГ: `expand_around` дампил ~5 КБ base64 (зашифрованная
-  thinking-подпись) + полный сырой message-конверт на турн → drill-down бесполезен.
-  Починен (`9e2b584`): чистый рендер, 10000+ → 1534 символа.
+- We played out a real "resume the task" (Drop silent-loss) on the live tools: `recall`
+  found the right neighborhood; an `expand_around` dive into the "Итог" (Summary) turn returned a ready
+  brief — decision + why + status + what's left.
+- **Briefs ALREADY exist** in the data we vectorize — as past assistant "Итог" (Summary) answers.
+  A separate distillation layer is not needed.
+- The real blocker was a BUG: `expand_around` dumped ~5 KB of base64 (an encrypted
+  thinking signature) + the full raw message envelope per turn → drill-down was useless.
+  Fixed (`9e2b584`): clean rendering, 10000+ → 1534 characters.
 
-## Отвергли
+## Rejected
 
-- **Дистиллированные «брифы задач»** (отдельный пайплайн) — брифы и так есть как
-  «Итог»-турны; пайплайн = устаревание + стоимость генерации/поддержки.
-- **A/B бейк-офф** — оверинжиниринг под спекулятивный зазор.
-- **Ambient авто-инжект** (v2) — пока on-demand тула достаточно.
-- **MMR** — точечные дубли уже решены `content_hash`-коллапсом.
+- **Distilled "task briefs"** (a separate pipeline) — briefs already exist as
+  "Итог" (Summary) turns; a pipeline = staleness + generation/maintenance cost.
+- **A/B bake-off** — overengineering for a speculative gap.
+- **Ambient auto-inject** (v2) — an on-demand tool is enough for now.
+- **MMR** — exact duplicates are already solved by `content_hash` collapse.
 
-## Остаток (parked — строим только по живому сигналу)
+## Remainder (parked — build only on a live signal)
 
-- **#2 `recall_context(query)`** — один вызов = recall + авто-чистый-expand → читаемые
-  блоки обсуждения вместо сниппетов. НЕ строим, пока реальная боль не покажет, что
-  `recall → expand` (оба теперь чистые) мало.
-- v1.x: индексировать финалки сабагентов (`agent-*`, эпизод #28); summary-bias
-  ранжирования (поднимать «Итог»/решающие турны).
+- **#2 `recall_context(query)`** — one call = recall + auto-clean-expand → readable
+  discussion blocks instead of snippets. NOT building it until real pain shows that
+  `recall → expand` (both now clean) is not enough.
+- v1.x: index subagent finals (`agent-*`, episode #28); summary-bias
+  ranking (lift "Итог" (Summary)/decisive turns).
 
-Принцип: добавляем сложность только когда живое использование докажет нужду.
+Principle: add complexity only when live usage proves the need.

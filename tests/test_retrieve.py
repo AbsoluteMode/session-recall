@@ -185,6 +185,41 @@ def test_grep_scoped_to_repo(tmp_path):
     store.close()
 
 
+def test_recent_sessions_orders_scopes_and_labels(tmp_path):
+    """recent_sessions surfaces the freshest sessions first (the 'what's current /
+    how fresh' need from feedback), scoped to the repo, each labelled by its first
+    user prompt. The top entry's last_activity is the effective index freshness."""
+    import hashlib
+    from session_recall.models import Chunk
+
+    def mk(sid, uuid, text, cwd, ts, role, turn):
+        return Chunk(session_id=sid, uuid=uuid, role=role, text=text, project="p",
+                     cwd=cwd, git_branch="b", ts=ts, file_path="/f.jsonl", byte_offset=0,
+                     byte_len=5, turn_index=turn,
+                     content_hash=hashlib.sha256((uuid + text).encode()).hexdigest())
+
+    store = Store(tmp_path / "rs.db")
+    emb = FakeEmbedder()
+    v = emb.embed_documents(["x"])[0]
+    store.add(mk("sA", "a1", "question alpha", "/Users/me/repoA", 100, "user", 0), v)
+    store.add(mk("sA", "a2", "answer alpha", "/Users/me/repoA", 150, "assistant", 1), v)
+    store.add(mk("sB", "b1", "question beta", "/Users/me/repoA", 300, "user", 0), v)
+    store.add(mk("sC", "c1", "question gamma", "/Users/me/repoB", 500, "user", 0), v)
+    r = Recall(store, emb, None)
+
+    glob = r.recent_sessions(limit=10, now=1000)
+    assert [s["session_id"] for s in glob] == ["sC", "sB", "sA"]  # newest first
+    assert glob[0]["last_activity"] == 500
+    assert "ago" in glob[0]["last_activity_human"]
+
+    scoped = r.recent_sessions(scope_cwd="/Users/me/repoA", limit=10, now=1000)
+    assert [s["session_id"] for s in scoped] == ["sB", "sA"]  # repoB excluded
+    sA = next(s for s in scoped if s["session_id"] == "sA")
+    assert sA["label"].startswith("question alpha")  # first USER prompt, not the answer
+    assert sA["turns"] == 2
+    store.close()
+
+
 def test_grep_skips_missing_files_global(tmp_path):
     """Regression: a transcript indexed earlier but later DELETED from disk must
     not crash a global grep. grep iterates every indexed file_path; one missing

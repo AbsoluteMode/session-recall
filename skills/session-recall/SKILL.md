@@ -16,8 +16,9 @@ familiar, check; it is cheap.
 Do NOT use for brand-new tasks with no plausible history, or trivial one-offs.
 
 ## Two ways to recall (pick by depth)
-- **Quick check** — call `mcp__session-recall__recall_search("<topic>")` yourself. Good for
-  "did we ever discuss X?": ranked snippets in one call.
+- **Quick check** — call the `recall_search` tool yourself (from the session-recall MCP server).
+  Good for "did we ever discuss X?": ranked snippets in one call. The `recent_sessions` tool lists
+  the freshest past sessions when you want "what's the latest / how current is the index".
 - **Deep grounding** — dispatch the **`recall` subagent** (Agent tool,
   `subagent_type: session-recall:recall`) with the topic. It searches deeply, reads the raw arc
   itself, and returns ONLY a tight brief (task / decisions+why / tried-rejected / current state /
@@ -25,7 +26,7 @@ Do NOT use for brand-new tasks with no plausible history, or trivial one-offs.
   snippet.
 
 ## Scoping to the current project
-`recall_search` and `grep` take an optional `scope_cwd`. Pass your current working directory to
+`recall_search`, `grep` and `recent_sessions` take an optional `scope_cwd`. Pass your current working directory to
 restrict results to the current project/repo — worktrees collapse to the repo root automatically,
 so the main checkout and every worktree share one scope. This cuts cross-project noise and sharpens
 the top hits; make it your default for repo-local questions.
