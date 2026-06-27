@@ -1,85 +1,85 @@
-# grep устойчив к транскриптам, удалённым после индексации
+# grep is resilient to transcripts deleted after indexing
 
-**Дата:** 2026-06-27 · **Ветка:** `fix/grep-resilient-deleted-transcripts`
+**Date:** 2026-06-27 · **Branch:** `fix/grep-resilient-deleted-transcripts`
 
-## Контекст
+## Context
 
-Фидбэк из живого использования (другая сессия, инструмент оценён на 8/10):
-глобальный `grep` (без `session_id`) упал с
+Feedback from live usage (a different session, the tool rated 8/10):
+global `grep` (without `session_id`) crashed with
 
 ```
 [Errno 2] No such file or directory:
 /Users/maxim/.claude/projects/-Users-maxim/98688231-0c4e-471d-aec2-a4ee74efda4f.jsonl
 ```
 
-Гипотеза в фидбэке: путь «битый/обрезанный» (`-Users-maxim` вместо
-`-Users-maxim-xyeta-trend-detection`), вероятно из-за пробела/спецсимвола в пути
-сессии. Вывод фидбэка: точечный grep по `session_id` ок, глобальный ненадёжен.
+Hypothesis in the feedback: the path is "broken/truncated" (`-Users-maxim` instead of
+`-Users-maxim-xyeta-trend-detection`), probably due to a space/special character in the session
+path. Feedback conclusion: targeted grep by `session_id` is fine, global is unreliable.
 
-## Решение
+## Decision
 
-`_read_turns(file_path)` оборачиваем в `try/except OSError → return []`.
-Фикс в **источнике** (единственное место, где открывается файл с диска), а не в
-цикле `grep`. Это покрывает все три читающих диск тула:
+Wrap `_read_turns(file_path)` in `try/except OSError → return []`.
+The fix is at the **source** (the single place where a file is opened from disk), not in the
+`grep` loop. This covers all three disk-reading tools:
 
-- `grep` (скан по всем индексированным путям) — пропавший файл даёт `[]` турнов →
-  ноль хитов от него → скан продолжается;
-- `expand_around` / `step` (точечный drill-down) — мёртвый anchor деградирует до
-  `[]`, что консистентно с их же поведением при ненайденном `uuid`.
+- `grep` (scan over all indexed paths) — a missing file yields `[]` turns →
+  zero hits from it → the scan continues;
+- `expand_around` / `step` (targeted drill-down) — a dead anchor degrades to
+  `[]`, which is consistent with their own behavior on a not-found `uuid`.
 
-**Гигиена индекса (комплемент, тот же заход).** `Store.prune_deleted()` в начале
-`index_corpus`: проходит `indexed_files`, у кого пути нет на диске — выкидывает их
-чанки (`delete_file`: chunks + vec + fts) и строку `indexed_files`. `index_corpus`
-ходит только по существующим файлам, поэтому удалённый сам никогда не подчистится.
-Два слоя defense-in-depth: resilience не даёт упасть **сейчас**, prune убирает
-мёртвые строки, чтобы они не всплывали и в `recall_search` (где текст живёт в БД, а
-drill-down по такому хиту вернул бы пусто).
+**Index hygiene (complement, same pass).** `Store.prune_deleted()` at the start of
+`index_corpus`: it walks `indexed_files`, and for those whose path is not on disk — drops their
+chunks (`delete_file`: chunks + vec + fts) and the `indexed_files` row. `index_corpus`
+only walks existing files, so a deleted one would never clean itself up.
+Two layers of defense-in-depth: resilience keeps it from crashing **now**, prune removes
+dead rows so they don't surface in `recall_search` either (where the text lives in the DB, and a
+drill-down on such a hit would return nothing).
 
-## Почему
+## Why
 
-Диагностика опровергла гипотезу фидбэка. Замер по реальному индексу:
+Diagnosis disproved the feedback hypothesis. Measurement against the real index:
 
-- `~/.claude/projects/-Users-maxim/` **существует** — это валидный project-dir для
-  сессий, запущенных из home `/Users/maxim` (23 `.jsonl`). Путь не обрезан, кодировка
-  корректна.
-- Из **338** индексированных `file_path` на диске нет ровно **одного** — того самого
-  `98688231-…jsonl`. Файл был **удалён после индексации**; его чанки остались в БД и
-  указывают на исчезнувший путь.
+- `~/.claude/projects/-Users-maxim/` **exists** — it is a valid project dir for
+  sessions launched from home `/Users/maxim` (23 `.jsonl`). The path is not truncated, the encoding
+  is correct.
+- Of the **338** indexed `file_path` entries, exactly **one** is missing from disk — that very
+  `98688231-…jsonl`. The file was **deleted after indexing**; its chunks remained in the DB and
+  point at the vanished path.
 
-Корень — не кодировка пути, а отсутствие устойчивости слоя чтения к
-файлу-призраку. Глобальный grep обходит КАЖДЫЙ индексированный путь, поэтому
-гарантированно натыкается на любой удалённый файл и роняет весь скан одним
-`open()`. Session-scoped grep тот файл просто не трогает — отсюда «точечный ок,
-глобальный падает».
+The root cause is not path encoding, but the lack of resilience in the read layer to a
+ghost file. Global grep walks EVERY indexed path, so it is
+guaranteed to hit any deleted file and crash the whole scan on a single
+`open()`. Session-scoped grep simply never touches that file — hence "targeted is fine,
+global crashes".
 
-`OSError` (а не только `FileNotFoundError`) — ловим заодно и нечитаемый из-за прав
-файл: для скана любой непрочитанный файл = пропустить, не падать.
+`OSError` (rather than only `FileNotFoundError`) — also catches a file unreadable due to
+permissions: for a scan, any unreadable file = skip, don't crash.
 
-## Что протестировали
+## What was tested
 
-- RED-тест `test_grep_skips_missing_files_global`: два чанка, один → живой файл с
-  иглой, другой → путь, которого нет на диске; глобальный grep обязан вернуть живые
-  хиты и не упасть. Падал с тем же `FileNotFoundError` в `retrieve.py:81`, что и в
-  проде → после фикса зелёный.
-- Живой индекс: `grep("VOYAGE_API_KEY")` без `session_id` (обходит все файлы,
-  включая удалённый) → 688 хитов вместо краша.
-- RED-тест `test_index_prunes_chunks_for_deleted_transcripts`: индексируем 2 файла,
-  один удаляем с диска, ре-индекс → его чанки (+ vec/fts + строка `indexed_files`)
-  выпилены, живой файл цел. Падал (1 ≠ 0) до прунинга → зелёный.
-- Живой индекс: `prune_deleted()` → выпилен 1 файл (тот самый `98688231-…`); после —
-  0 чанков указывают на несуществующий путь.
-- Полный набор: 60 passed, 0 регрессий.
+- RED test `test_grep_skips_missing_files_global`: two chunks, one → a live file with
+  the needle, the other → a path that is not on disk; global grep must return the live
+  hits and not crash. It failed with the same `FileNotFoundError` in `retrieve.py:81` as in
+  prod → green after the fix.
+- Live index: `grep("VOYAGE_API_KEY")` without `session_id` (walks all files,
+  including the deleted one) → 688 hits instead of a crash.
+- RED test `test_index_prunes_chunks_for_deleted_transcripts`: index 2 files,
+  delete one from disk, re-index → its chunks (+ vec/fts + the `indexed_files` row) are
+  pruned, the live file is intact. It failed (1 ≠ 0) before pruning → green.
+- Live index: `prune_deleted()` → 1 file pruned (that very `98688231-…`); afterward —
+  0 chunks point at a nonexistent path.
+- Full suite: 60 passed, 0 regressions.
 
-## Отвергли
+## Rejected
 
-- **Гипотеза «битый/обрезанный путь» (из фидбэка)** — опровергнута замером: dir
-  валиден, кодировка корректна, файл просто удалён.
-- **Ловить ошибку в цикле `grep`** — чинит только grep; `expand_around`/`step`
-  остались бы хрупкими на мёртвом anchor. Фикс в источнике покрывает всех.
-- **Прунинг как ЕДИНСТВЕННЫЙ фикс** — не убирает краш сам по себе (гонка: файл
-  могут удалить между индексацией и чтением, в том же запуске). Поэтому прунинг
-  взят **комплементом** к resilience (оба в этом заходе), а не заменой.
+- **The "broken/truncated path" hypothesis (from the feedback)** — disproved by measurement: the dir
+  is valid, the encoding is correct, the file was simply deleted.
+- **Catching the error in the `grep` loop** — fixes only grep; `expand_around`/`step`
+  would stay fragile on a dead anchor. The fix at the source covers them all.
+- **Pruning as the SOLE fix** — it doesn't remove the crash by itself (a race: a file
+  can be deleted between indexing and reading, in the same run). So pruning is
+  taken as a **complement** to resilience (both in this pass), not a replacement.
 
-Фидбэк-эргономика (не баги, отдельно): нет примитива «хвост сессии / свежие
-сессии»; индекс-freshness не виден агенту; тред размазан по нескольким `session_id`
-(нет склейки по worktree/треду); `when` — сырой epoch.
+Feedback ergonomics (not bugs, separate): there is no "session tail / recent
+sessions" primitive; index freshness is not visible to the agent; a thread is spread across several `session_id`
+(no stitching by worktree/thread); `when` is a raw epoch.

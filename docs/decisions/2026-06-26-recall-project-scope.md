@@ -1,75 +1,75 @@
-# Recall умеет сужать поиск до текущего проекта (по cwd, не по project-имени)
+# Recall can narrow the search to the current project (by cwd, not by project name)
 
-**Дата:** 2026-06-26
+**Date:** 2026-06-26
 
-## Контекст
+## Context
 
-`recall_search`/`grep` искали глобально по всему корпусу сессий. При работе над
-конкретным репо это подмешивает шум из других проектов: семантически похожий
-кусок из чужого репо вытесняет нужный из top-k ещё до реранкера. Хотелось
-опционально сужать поиск до текущего проекта, не теряя возможность кросс-проектного
+`recall_search`/`grep` searched globally across the entire session corpus. When working on
+a specific repo this mixes in noise from other projects: a semantically similar
+fragment from a foreign repo crowds the needed one out of top-k before the reranker even runs. We wanted
+to optionally narrow the search to the current project without losing cross-project
 recall.
 
-Решение принимали с советом из 4 движков (Storm: claude+codex+glm+gemini) —
-полный консенсус по всем пунктам, разошлись только в множителе over-fetch.
+The decision was made with a 4-engine council (Storm: claude+codex+glm+gemini) —
+full consensus on every point, diverging only on the over-fetch multiplier.
 
-## Решение
+## Decision
 
-Опциональный `scope_cwd` на `recall_search` и `grep` (по умолчанию отсутствует →
-прежний глобальный поиск). Агент передаёт свой сырой `cwd`; сервер нормализует его
-к корню репо и фильтрует **существующую** колонку `cwd` граничным префиксом. Без
-изменения схемы и без переиндексации.
+An optional `scope_cwd` on `recall_search` and `grep` (absent by default →
+the previous global search). The agent passes its raw `cwd`; the server normalizes it
+to the repo root and filters the **existing** `cwd` column by a bounded prefix. No
+schema change and no reindexing.
 
-- `scope.repo_root(cwd)` — срезает суффикс `/.claude/worktrees/<name>` → все
-  сессии репо (main + каждый worktree) схлопываются в один scope.
-- `scope.scope_clause(column, root)` — общий предикат для KNN и FTS (чтобы логика
-  не разъехалась): `cwd = root OR cwd LIKE root||'/%' ESCAPE '\'`.
-- KNN: vec0 не умеет pre-filter по joined-колонке → over-fetch кандидатов
-  (`clamp(n*30, 300, 2000)`, не больше total) + фильтр через JOIN, LIMIT n.
-- FTS: JOIN `chunks` + предикат до LIMIT (точно, без over-fetch).
+- `scope.repo_root(cwd)` — strips the `/.claude/worktrees/<name>` suffix → all
+  sessions of the repo (main + each worktree) collapse into one scope.
+- `scope.scope_clause(column, root)` — a shared predicate for KNN and FTS (so the logic
+  doesn't drift apart): `cwd = root OR cwd LIKE root||'/%' ESCAPE '\'`.
+- KNN: vec0 cannot pre-filter on a joined column → over-fetch candidates
+  (`clamp(n*30, 300, 2000)`, no more than total) + filter via JOIN, LIMIT n.
+- FTS: JOIN `chunks` + the predicate before LIMIT (exact, no over-fetch).
 
-## Почему
+## Why
 
-- **Ключ = cwd, не `project`-имя.** `_project_name` берёт последний сегмент пути
-  → для worktree даёт мусорный хэш (`-Users-me-myrepo--claude-worktrees-...-a1b2c3`
-  → `a1b2c3`), а почти вся реальная работа идёт в worktree. Фильтр по имени
-  пропустил бы ~90% истории репо и путал бы коллизии (`.../api` → `api`). `cwd` —
-  надёжное поле (реальный абсолютный путь из каждого turn).
-- **Нормализация строкой, не git.** `git rev-parse --show-toplevel` внутри
-  worktree возвращает сам worktree, а не родителя, и падает на удалённых/исторических
-  worktree-путях, хранящихся в индексе. Чистый strip регуляркой работает всегда.
-- **Граница `/%` обязательна.** Без неё `LIKE 'myrepo%'` сожрал бы соседний
-  `myrepo-backend`. LIKE-wildcards в root экранируются.
-- **Default = global, сужение opt-in.** Чисто аддитивно, нулевая регрессия,
-  кросс-проектный recall остаётся дефолтом. Сервер user-scope не знает cwd сам, так
-  что агент передаёт строку явно (политика «по умолчанию scoped» — в промпте
-  subagent/SKILL, не в самом туле).
-- **Сервер нормализует, агент шлёт сырой cwd.** Одна чистая тестируемая функция,
-  без git-зависимости; subagent `recall` без shell не может сам узнать `pwd` —
-  поэтому вызывающий агент кладёт cwd в dispatch.
+- **The key = cwd, not the `project` name.** `_project_name` takes the last path segment
+  → for a worktree it yields a garbage hash (`-Users-me-myrepo--claude-worktrees-...-a1b2c3`
+  → `a1b2c3`), and almost all real work happens in a worktree. Filtering by name
+  would miss ~90% of the repo's history and confuse collisions (`.../api` → `api`). `cwd` is
+  a reliable field (the real absolute path from each turn).
+- **Normalize with a string, not git.** `git rev-parse --show-toplevel` inside a
+  worktree returns the worktree itself, not the parent, and fails on deleted/historical
+  worktree paths stored in the index. A plain regex strip works every time.
+- **The `/%` boundary is mandatory.** Without it `LIKE 'myrepo%'` would swallow the neighboring
+  `myrepo-backend`. LIKE wildcards in root are escaped.
+- **Default = global, narrowing is opt-in.** Purely additive, zero regression,
+  cross-project recall stays the default. The server in user-scope doesn't know cwd itself, so
+  the agent passes the string explicitly (the "scoped by default" policy lives in the
+  subagent/SKILL prompt, not in the tool itself).
+- **The server normalizes, the agent sends the raw cwd.** One clean testable function,
+  no git dependency; the `recall` subagent without a shell cannot learn `pwd` itself —
+  so the calling agent puts cwd into the dispatch.
 
-## Что протестировали
+## What was tested
 
-- 17 новых тестов TDD (RED→GREEN), полная сюита 53 passed, 0 регрессий.
-- `repo_root`: plain-путь, worktree-суффикс, trailing slash, пусто.
-- `scope_clause`: None=без фильтра, exact-or-prefix, экранирование `%`/`_`.
-- store KNN/FTS: фильтр по префиксу + граница `/repo` ≠ `/repo-backend`.
-- retrieve: scoped исключает другой репо; worktree-cwd нормализуется к корню; grep scoped.
-- server: проброс `scope_cwd` end-to-end на реальных данных двух репо.
-- **Гипотеза снята:** боялись, что sqlite-vec отвергнет `MATCH`+`k` с доп. WHERE
-  по joined-колонке (готов был two-step fallback) — установленная версия приняла
-  single-query JOIN, fallback не понадобился.
+- 17 new TDD tests (RED→GREEN), full suite 53 passed, 0 regressions.
+- `repo_root`: plain path, worktree suffix, trailing slash, empty.
+- `scope_clause`: None=no filter, exact-or-prefix, escaping `%`/`_`.
+- store KNN/FTS: prefix filter + boundary `/repo` ≠ `/repo-backend`.
+- retrieve: scoped excludes another repo; worktree cwd normalizes to the root; grep scoped.
+- server: `scope_cwd` passthrough end-to-end on real data from two repos.
+- **Hypothesis dropped:** we feared sqlite-vec would reject `MATCH`+`k` with an extra WHERE
+  on a joined column (a two-step fallback was ready) — the installed version accepted
+  the single-query JOIN, the fallback was not needed.
 
-## Отвергли
+## Rejected
 
-- Фильтр по `project`-имени — битый для worktree, коллизии.
-- `git rev-parse` для корня — возвращает worktree, падает на удалённых путях.
-- Per-repo / партиционированные vec-таблицы — overkill, скан и так дёшев.
-- Денормализация cwd в FTS-таблицу — лишний rebuild, JOIN проще.
-- Чинить битое `_project_name` в этом заходе — cwd обходит его; вынесено в follow-up.
-- Эхо resolved-scope в каждый результат — пока не делаем (сломало бы формат
-  вывода); under-fill закрыт политикой «scoped тонко → повтори global» в промпте.
-- Авто-детект scope сервером — невозможно на user-scope (cwd не передаётся в MCP).
+- Filtering by the `project` name — broken for worktrees, collisions.
+- `git rev-parse` for the root — returns the worktree, fails on deleted paths.
+- Per-repo / partitioned vec tables — overkill, the scan is cheap anyway.
+- Denormalizing cwd into the FTS table — an extra rebuild, JOIN is simpler.
+- Fixing the broken `_project_name` in this pass — cwd bypasses it; moved to a follow-up.
+- Echoing the resolved scope in every result — not doing it yet (would break the output
+  format); under-fill is covered by the "scoped too thin → re-run global" policy in the prompt.
+- Server-side scope auto-detection — impossible in user-scope (cwd is not passed into MCP).
 
 ---
-Реализация: `scope.py` (`repo_root` + `scope_clause`) + проводка в store/retrieve/server; тесты `tests/test_scope.py`.
+Implementation: `scope.py` (`repo_root` + `scope_clause`) + wiring into store/retrieve/server; tests `tests/test_scope.py`.

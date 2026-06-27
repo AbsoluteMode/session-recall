@@ -46,6 +46,26 @@ def test_recall_search_forwards_scope_cwd(tmp_path, monkeypatch):
     store.close()
 
 
+def test_recall_search_enriches_with_human_timestamp(tmp_path, monkeypatch):
+    store = Store(tmp_path / "h.db")
+    store.add(*_mk("u1", "alpha", "/Users/me/repoA", 0))
+    monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
+    out = server.recall_search("alpha", k=1)
+    assert out and "when_human" in out[0], "raw epoch not enriched with when_human"
+    store.close()
+
+
+def test_recent_sessions_tool_delegates_and_scopes(tmp_path, monkeypatch):
+    store = Store(tmp_path / "rs.db")
+    store.add(*_mk("u1", "hello", "/Users/me/repoA", 0, session_id="s1"))
+    store.add(*_mk("u2", "hello", "/Users/me/repoB", 1, session_id="s2"))
+    monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
+    out = server.recent_sessions(scope_cwd="/Users/me/repoA")
+    assert [s["session_id"] for s in out] == ["s1"], "recent_sessions did not scope to repo"
+    assert "last_activity_human" in out[0]
+    store.close()
+
+
 def test_grep_forwards_scope_cwd(tmp_path, monkeypatch):
     fa = tmp_path / "a.jsonl"
     fa.write_text('{"type":"user","uuid":"u1","sessionId":"sa",'

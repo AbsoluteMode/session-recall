@@ -1,11 +1,13 @@
 # src/session_recall/retrieve.py
 import json
+import time
 from pathlib import Path
 from .store import Store
 from .embed import Embedder
 from .rerank import Reranker
 from .models import Anchor, Turn
 from .scope import repo_root, scope_clause
+from .timefmt import humanize_ts
 
 def _snippet(text: str, n: int = 200) -> str:
     return text[:n] + ("…" if len(text) > n else "")
@@ -192,3 +194,24 @@ class Recall:
                                        snippet=_snippet(blob), score=1.0, project=project,
                                        when=0))
         return hits
+
+    def recent_sessions(self, scope_cwd: str | None = None, limit: int = 10,
+                        now: int | None = None) -> list[dict]:
+        # Freshest sessions first — answers "what's the current state / how fresh is
+        # the index" (the top entry's last_activity IS the effective freshness) and
+        # surfaces the sessions of a thread spread across resume-created session_ids,
+        # so the arc can be reassembled without manual sorting. now is injectable for
+        # deterministic tests. WHY: docs/decisions/2026-06-27-recall-ergonomics-when-and-recent-sessions.md
+        root = repo_root(scope_cwd) if scope_cwd else None
+        now = int(time.time()) if now is None else now
+        out: list[dict] = []
+        for sid, project, last_ts, turns in self.store.recent_sessions(root, limit):
+            out.append({
+                "session_id": sid,
+                "project": project,
+                "turns": turns,
+                "last_activity": last_ts,
+                "last_activity_human": humanize_ts(last_ts, now),
+                "label": _snippet(self.store.first_user_text(sid), 120),
+            })
+        return out

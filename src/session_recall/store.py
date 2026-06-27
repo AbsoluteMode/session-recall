@@ -125,6 +125,24 @@ class Store:
             data[k] = int(data[k])
         return Chunk(**data)
 
+    def recent_sessions(self, scope_root: str | None, limit: int) -> list[tuple]:
+        """Sessions by most-recent activity (max ts), optionally scoped to a repo.
+        Returns (session_id, project, last_ts, turns). Tiebreak on session_id so
+        equal-timestamp ordering is deterministic."""
+        clause, params = scope_clause("cwd", scope_root)
+        where = f" WHERE {clause}" if clause else ""
+        return self.db.execute(
+            f"SELECT session_id, project, max(ts) AS last_ts, count(*) AS turns "
+            f"FROM chunks{where} GROUP BY session_id ORDER BY last_ts DESC, session_id LIMIT ?",
+            (*params, limit)).fetchall()
+
+    def first_user_text(self, session_id: str) -> str:
+        """The session's earliest user prompt — a human label for the session."""
+        row = self.db.execute(
+            "SELECT text FROM chunks WHERE session_id = ? AND role = 'user' "
+            "ORDER BY turn_index LIMIT 1", (session_id,)).fetchone()
+        return row[0] if row else ""
+
     def mark_indexed(self, path: str, sig: str):
         self.db.execute(
             "INSERT INTO indexed_files(path, sig) VALUES (?, ?) "
