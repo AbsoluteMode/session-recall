@@ -14,6 +14,10 @@ def _project_name(project_dir: Path) -> str:
     return project_dir.name.lstrip("-").split("-")[-1]
 
 def index_corpus(store: Store, embedder: Embedder, projects_dir: Path) -> int:
+    # Drop rows for transcripts deleted since the last run before scanning: a
+    # deleted file is never visited below (we only walk existing files), so its
+    # chunks would otherwise linger in the index forever.
+    store.prune_deleted()
     new_count = 0
     for project_dir in sorted(Path(projects_dir).iterdir()):
         if not project_dir.is_dir():
