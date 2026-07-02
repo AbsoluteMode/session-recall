@@ -22,7 +22,9 @@ class Anchor:
     uuid: str
     role: str
     snippet: str
-    score: float
+    # None = keyword-only recall_search hit (relevance unknown: no vector distance,
+    # no rerank). grep anchors keep 1.0 — an exact substring match by construction.
+    score: "float | None"
     project: str
     when: int
 

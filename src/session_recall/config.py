@@ -9,7 +9,9 @@ CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 # but any provider works: set these env vars (e.g. provider=openai,
 # model=text-embedding-3-large, dim=1024). Adding a provider = one branch in
 # embed.make_embedder; the rest of the pipeline only sees the Embedder protocol.
-# NB: changing provider or dim requires a fresh index — the vector table is dim-typed.
+# NB: provider/model changes are detected via the embed fingerprint baked into
+# file signatures — the next `index` run re-embeds everything cleanly. Changing
+# dim still requires a fresh index: the vector table is dim-typed.
 EMBED_PROVIDER = os.environ.get("SESSION_RECALL_EMBED_PROVIDER", "voyage")
 EMBED_MODEL = os.environ.get("SESSION_RECALL_EMBED_MODEL", "voyage-4-large")
 EMBED_DIM = int(os.environ.get("SESSION_RECALL_EMBED_DIM", "1024"))

@@ -6,7 +6,7 @@ from .store import Store
 from .embed import Embedder
 from .rerank import Reranker
 from .models import Anchor, Turn
-from .scope import repo_root, scope_clause
+from .scope import repo_root, in_scope, project_label
 from .timefmt import humanize_ts
 
 def _snippet(text: str, n: int = 200) -> str:
@@ -19,7 +19,7 @@ class Recall:
         self.reranker = reranker
 
     @staticmethod
-    def _anchor(c, score: float) -> Anchor:
+    def _anchor(c, score: "float | None") -> Anchor:
         return Anchor(session_id=c.session_id, uuid=c.uuid, role=c.role,
                       snippet=_snippet(c.text), score=score, project=c.project, when=c.ts)
 
@@ -70,11 +70,13 @@ class Recall:
 
         if ranked is not None:
             return [self._anchor(chunk_by_id[distinct[idx]], score) for idx, score in ranked]
-        # no reranker: KNN-similarity order; score monotonic in similarity, metric-agnostic
+        # no reranker: KNN-similarity order; score monotonic in similarity, metric-
+        # agnostic. Keyword-only hits carry None (no distance), not a fake 0.0 that
+        # reads as "irrelevant" at the tool boundary.
         out: list[Anchor] = []
         for cid in distinct[:k]:
             d = dist.get(cid)
-            score = round(1.0 / (1.0 + d), 4) if isinstance(d, (int, float)) else 0.0
+            score = round(1.0 / (1.0 + d), 4) if isinstance(d, (int, float)) else None
             out.append(self._anchor(chunk_by_id[cid], score))
         return out
 
@@ -96,12 +98,37 @@ class Recall:
             return []
         return turns
 
-    def _file_for(self, uuid: str) -> str:
-        row = self.store.db.execute(
-            "SELECT file_path FROM chunks WHERE uuid = ? LIMIT 1", (uuid,)).fetchone()
-        if not row:
-            raise KeyError(uuid)
-        return row[0]
+    def _files_for(self, uuid: str, session_id: str | None) -> list[str]:
+        """Transcript path candidates for an anchor. A uuid straight from
+        recall_search resolves via chunks; grep anchors may point at raw turns
+        that never became chunks (tool_result-only turns, filtered boilerplate),
+        so fall back to the anchor's session: its chunk-bearing files, else the
+        <session_id>.jsonl transcript itself (indexed but chunk-less)."""
+        files = [r[0] for r in self.store.db.execute(
+            "SELECT DISTINCT file_path FROM chunks WHERE uuid = ?", (uuid,)).fetchall()]
+        if not files and session_id:
+            files = [r[0] for r in self.store.db.execute(
+                "SELECT DISTINCT file_path FROM chunks WHERE session_id = ?",
+                (session_id,)).fetchall()]
+            escaped = (session_id.replace("\\", "\\\\")
+                       .replace("_", "\\_").replace("%", "\\%"))
+            files += [r[0] for r in self.store.db.execute(
+                "SELECT path FROM indexed_files WHERE path LIKE ? ESCAPE '\\'",
+                ("%/" + escaped + ".jsonl",)).fetchall() if r[0] not in files]
+        if not files:
+            raise LookupError(
+                f"no indexed transcript for uuid={uuid!r} session_id={session_id!r} "
+                f"(is the index fresh? run `session-recall index`)")
+        return files
+
+    def _locate(self, session_id: str, uuid: str) -> tuple[list[dict], int] | None:
+        """Find the turn: (all turns of its transcript, its position), or None."""
+        for path in self._files_for(uuid, session_id):
+            objs = self._read_turns(path)
+            idx = next((i for i, o in enumerate(objs) if o.get("uuid") == uuid), None)
+            if idx is not None:
+                return objs, idx
+        return None
 
     @staticmethod
     def _render_content(obj: dict) -> str:
@@ -148,18 +175,18 @@ class Recall:
         )
 
     def expand_around(self, session_id: str, uuid: str, before: int = 2, after: int = 2) -> list[Turn]:
-        objs = self._read_turns(self._file_for(uuid))
-        idx = next((i for i, o in enumerate(objs) if o.get("uuid") == uuid), None)
-        if idx is None:
+        loc = self._locate(session_id, uuid)
+        if loc is None:
             return []
+        objs, idx = loc
         lo, hi = max(0, idx - before), min(len(objs), idx + after + 1)
         return [self._as_turn(o) for o in objs[lo:hi]]
 
     def step(self, session_id: str, uuid: str, direction: str, count: int = 1) -> list[Turn]:
-        objs = self._read_turns(self._file_for(uuid))
-        idx = next((i for i, o in enumerate(objs) if o.get("uuid") == uuid), None)
-        if idx is None:
+        loc = self._locate(session_id, uuid)
+        if loc is None:
             return []
+        objs, idx = loc
         if direction == "next":
             target = idx + count
         elif direction == "prev":
@@ -173,26 +200,46 @@ class Recall:
     def grep(self, pattern: str, session_id: str | None = None,
              scope_cwd: str | None = None) -> list[Anchor]:
         root = repo_root(scope_cwd) if scope_cwd else None
-        clause, params = scope_clause("cwd", root)
-        conds, args = [], []
-        if session_id:
-            conds.append("session_id = ?")
-            args.append(session_id)
-        if clause:
-            conds.append(clause)
-            args.extend(params)
-        where = (" WHERE " + " AND ".join(conds)) if conds else ""
-        rows = self.store.db.execute(
-            "SELECT DISTINCT session_id, file_path, project FROM chunks" + where,
-            tuple(args)).fetchall()
+        # Per-path chunk metadata. A file can carry SEVERAL (sid, cwd) pairs —
+        # resumed sessions mix sessionIds in one transcript — so this is only a
+        # fast-path skip (skip a file when NO row could match) and a fallback for
+        # turns lacking their own fields; the authoritative filter is per turn.
+        meta: dict[str, list[tuple[str, str, str]]] = {}  # path -> [(sid, project, cwd)]
+        for sid, path, project, cwd in self.store.db.execute(
+                "SELECT DISTINCT session_id, file_path, project, cwd FROM chunks").fetchall():
+            meta.setdefault(path, []).append((sid, project, cwd))
+        # Scan ALL indexed transcripts, not just chunk-bearing ones: a file whose
+        # every turn was filtered at extract (harness boilerplate, tool-only) is
+        # exactly the under-the-hood content grep exists for.
+        paths = [r[0] for r in self.store.db.execute(
+            "SELECT path FROM indexed_files").fetchall()]
+        known = set(paths)
+        paths += [p for p in meta if p not in known]  # ad-hoc stores / legacy rows
         hits: list[Anchor] = []
-        for sid, path, project in rows:
+        for path in paths:
+            rows = meta.get(path)
+            if rows:
+                if session_id and not any(s == session_id for s, _, _ in rows):
+                    continue
+                if root and not any(in_scope(c, root) for _, _, c in rows):
+                    continue
             for o in self._read_turns(path):
+                t_sid = o.get("sessionId") or (rows[0][0] if rows else "")
+                if session_id and t_sid != session_id:
+                    continue
+                t_cwd = o.get("cwd")
+                if root:
+                    if t_cwd:
+                        if not in_scope(t_cwd, root):
+                            continue  # turn provably outside the repo (mixed-cwd file)
+                    elif not rows:
+                        continue  # chunk-less file, no cwd evidence -> not provably in scope
                 blob = json.dumps(o, ensure_ascii=False)
                 if pattern in blob:
-                    hits.append(Anchor(session_id=sid, uuid=o.get("uuid", ""), role=o.get("type", ""),
-                                       snippet=_snippet(blob), score=1.0, project=project,
-                                       when=0))
+                    project = project_label(t_cwd) if t_cwd else (rows[0][1] if rows else "")
+                    hits.append(Anchor(session_id=t_sid, uuid=o.get("uuid", ""),
+                                       role=o.get("type", ""), snippet=_snippet(blob),
+                                       score=1.0, project=project, when=0))
         return hits
 
     def recent_sessions(self, scope_cwd: str | None = None, limit: int = 10,

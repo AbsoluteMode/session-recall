@@ -49,6 +49,28 @@ def test_fts_empty_query_returns_empty(tmp_path):
     assert s.fts("", 5) == []
     s.close()
 
+def test_fts_ranks_by_bm25_within_limit(tmp_path):
+    """fts() must return the BEST bm25 matches within n, not the first-inserted
+    rows. FTS5 without ORDER BY yields rowid (insertion) order, so LIMIT keeps an
+    arbitrary oldest slice and starves the hybrid's keyword arm of its actual
+    best hits (live index: 1158 matches, LIMIT 100 kept a random 8%)."""
+    s = Store(tmp_path / "t.db")
+    s.add(_chunk("u1", "embedding " + "unrelated filler words " * 40), [0.0] * 1024)
+    strong = s.add(_chunk("u2", "embedding cache embedding strategy embedding"), [0.0] * 1024)
+    assert s.fts("embedding", n=1) == [strong], \
+        "expected the dense bm25 match, got the first-inserted row"
+    s.close()
+
+def test_fts_scoped_ranks_by_bm25_within_limit(tmp_path):
+    """Same bm25 ordering guarantee for the scoped (JOIN) branch of fts()."""
+    s = Store(tmp_path / "t.db")
+    s.add(_chunk_cwd("u1", "embedding " + "unrelated filler words " * 40, "/repo/x"), [0.0] * 1024)
+    strong = s.add(_chunk_cwd("u2", "embedding cache embedding strategy embedding", "/repo/y"),
+                   [0.0] * 1024)
+    assert s.fts("embedding", n=1, scope_root="/repo") == [strong], \
+        "scoped fts must also rank by bm25, not insertion order"
+    s.close()
+
 
 def _chunk_in(uuid, text, file_path):
     c = _chunk(uuid, text)

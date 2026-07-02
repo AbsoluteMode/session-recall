@@ -19,6 +19,32 @@ def test_cli_index_then_search(tmp_path, monkeypatch, capsys):
     assert "cache" in out
 
 
+def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
+    """Debugging without MCP: `recent` lists sessions, `grep` scans raw
+    transcripts, `prune` reports dropped deleted-file rows."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    shutil.copy("tests/fixtures/session_a.jsonl", proj / "session_a.jsonl")
+    monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "projects")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
+    monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
+    monkeypatch.setattr(cli, "make_reranker", lambda: None)
+    cli.main(["index"])
+    capsys.readouterr()
+
+    cli.main(["recent"])
+    out = capsys.readouterr().out
+    assert "sa" in out and "cache embeddings" in out  # session id + first-prompt label
+
+    cli.main(["grep", "tool output not human"])
+    out = capsys.readouterr().out
+    assert "u2" in out  # the tool_result turn's uuid
+
+    cli.main(["prune"])
+    out = capsys.readouterr().out
+    assert "pruned 0" in out
+
+
 def test_cli_module_entrypoint_runs_main():
     # Regression: `python -m session_recall.cli` must invoke main(), not no-op.
     # A missing __main__ guard once made `index` silently do nothing (no DB).

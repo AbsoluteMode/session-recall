@@ -35,6 +35,36 @@ def test_grep_scans_raw(tmp_path):
     hits = r.grep("tool output not human")  # only existed under the hood
     assert hits and hits[0].session_id == "sa"
 
+
+def test_expand_around_resolves_grep_uuid_not_in_chunks(tmp_path):
+    """grep returns uuids of raw turns that never became chunks (tool_result-only
+    turns, filtered boilerplate). expand_around must resolve the transcript via
+    the anchor's session_id instead of blowing up with a bare KeyError.
+    Live repro: grep hit on a tool_result turn -> "Error executing tool: '<uuid>'"."""
+    r = _built(tmp_path)
+    hits = r.grep("tool output not human")
+    assert hits and hits[0].uuid == "u2"  # u2: greppable in the fixture, never chunked
+    turns = r.expand_around(hits[0].session_id, hits[0].uuid, before=1, after=1)
+    assert turns, "expand_around must work on a grep anchor outside chunks"
+    assert any("tool output not human" in t.content for t in turns)
+
+
+def test_step_resolves_grep_uuid_not_in_chunks(tmp_path):
+    """step must walk from a grep anchor whose uuid never became a chunk."""
+    r = _built(tmp_path)
+    prev = r.step("sa", "u2", "prev")
+    assert prev, "step must work on a grep anchor outside chunks"
+    assert "cache via an on-disk store" in prev[0].content  # a1, the turn before u2
+
+
+def test_expand_around_unknown_session_raises_informative_error(tmp_path):
+    """A uuid that resolves nowhere must fail with a message naming the ids —
+    not a bare KeyError('<uuid>') that surfaces as an opaque tool error."""
+    import pytest
+    r = _built(tmp_path)
+    with pytest.raises(LookupError, match="no indexed transcript"):
+        r.expand_around("ghost-session", "ghost-uuid")
+
 def test_expand_around_multifile_session_resolves_by_uuid(tmp_path):
     """Regression for I1: _file_for must look up by uuid, not session_id.
 
@@ -241,6 +271,107 @@ def test_grep_skips_missing_files_global(tmp_path):
     assert hits and all(h.session_id == "sa" for h in hits), \
         "grep should return live hits and skip the deleted transcript, not crash"
     store.close()
+
+
+def test_grep_filters_per_turn_on_mixed_session_file(tmp_path):
+    """Resumed sessions produce files whose turns carry DIFFERENT sessionIds
+    (and possibly cwds). Session/scope filters and anchor labels must apply per
+    turn: file-level metadata reduced to one arbitrary row silently returned 0
+    hits for the second sessionId (and leaked/mislabeled cross-repo turns)."""
+    f = tmp_path / "mixed.jsonl"
+    f.write_text(
+        '{"type":"user","uuid":"o1","sessionId":"s-old","cwd":"/alpha",'
+        '"message":{"role":"user","content":"old alpha needle"}}\n'
+        '{"type":"user","uuid":"n1","sessionId":"s-new","cwd":"/beta",'
+        '"message":{"role":"user","content":"fresh beta needle"}}\n')
+    store = Store(tmp_path / "m.db")
+    store.add(*_scoped_chunk("o1", "old alpha needle", "/alpha", 0,
+                             file_path=str(f), session_id="s-old"))
+    store.add(*_scoped_chunk("n1", "fresh beta needle", "/beta", 1,
+                             file_path=str(f), session_id="s-new"))
+    r = Recall(store, FakeEmbedder(), FakeReranker())
+
+    by_sid = r.grep("needle", session_id="s-new")
+    assert by_sid and all("fresh beta" in h.snippet for h in by_sid), \
+        "grep must find turns of the SECOND sessionId in a mixed file"
+    assert all(h.session_id == "s-new" for h in by_sid), "anchor sid must be the turn's own"
+
+    scoped = r.grep("needle", scope_cwd="/beta")
+    assert scoped and all("fresh beta" in h.snippet for h in scoped), \
+        "scope must apply per turn: no misses AND no cross-repo leaks"
+    assert all(h.session_id == "s-new" for h in scoped)
+    store.close()
+
+
+def test_files_for_escapes_like_wildcards_in_session_id(tmp_path):
+    """The <session_id>.jsonl fallback interpolates session_id into a LIKE
+    pattern: an unescaped '_' (one-any-char wildcard) would resolve session
+    's_1' to a DIFFERENT session's transcript sx1.jsonl — cross-session leak."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    (proj / "sx1.jsonl").write_text(
+        '{"type":"user","uuid":"g1","sessionId":"sx1",'
+        '"message":{"role":"user","content":'
+        '"<system-reminder>other session content</system-reminder>"}}\n')
+    store = Store(tmp_path / "e.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")  # chunk-less, indexed_files only
+    r = Recall(store, emb, FakeReranker())
+    import pytest
+    with pytest.raises(LookupError):
+        r.expand_around("s_1", "g1")  # must NOT resolve to sx1.jsonl via LIKE '_'
+    store.close()
+
+
+def test_recall_search_fts_only_hits_carry_none_score(tmp_path):
+    """Embedder down -> FTS-only degrade. Keyword hits have no vector distance;
+    they must surface score=None (JSON null), not a fake 0.0 that reads as
+    'irrelevant' at the tool boundary."""
+    store = Store(tmp_path / "f.db")
+    store.add(*_scoped_chunk("u1", "unique needle text", "/c", 0))
+
+    class _DownEmb(FakeEmbedder):
+        def embed_query(self, text):
+            raise RuntimeError("embedding api down")
+
+    hits = Recall(store, _DownEmb(), None).recall_search("needle", k=5)
+    assert hits, "FTS-only degrade must still return keyword hits"
+    assert hits[0].score is None, f"keyword-only hit must carry None, got {hits[0].score!r}"
+    store.close()
+
+
+def test_grep_covers_files_with_no_chunks(tmp_path):
+    """A transcript whose every turn was filtered at extract time (pure harness
+    boilerplate, tool-only traffic) produces zero chunks — but grep sells itself
+    as the under-the-hood scanner, so it must still scan that file: sources come
+    from indexed_files, not only chunk-bearing rows. The found anchor must also
+    expand (chunk-less transcripts resolve by their <session_id>.jsonl name)."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    noise = proj / "sn.jsonl"  # real transcripts are named <session_id>.jsonl
+    noise.write_text(
+        '{"type":"user","uuid":"n1","sessionId":"sn","cwd":"/Users/me/repoA",'
+        '"message":{"role":"user","content":'
+        '"<system-reminder>the needle hides here</system-reminder>"}}\n')
+    store = Store(tmp_path / "g.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")
+    assert store.db.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0  # precondition
+    r = Recall(store, emb, FakeReranker())
+
+    hits = r.grep("needle hides")
+    assert hits, "grep must scan chunk-less transcripts (indexed_files)"
+    assert hits[0].session_id == "sn" and hits[0].uuid == "n1"
+    assert hits[0].project == "repoA"  # derived from the turn's cwd
+
+    scoped = r.grep("needle hides", scope_cwd="/Users/me/repoB")
+    assert scoped == [], "chunk-less files must still honor scope (turn-level cwd)"
+    assert r.grep("needle hides", scope_cwd="/Users/me/repoA"), \
+        "in-scope chunk-less file must match"
+
+    turns = r.expand_around("sn", "n1")
+    assert turns and "needle hides" in turns[0].content, \
+        "grep anchor from a chunk-less transcript must expand"
 
 
 def test_recall_collapses_identical_content_across_sessions(tmp_path):

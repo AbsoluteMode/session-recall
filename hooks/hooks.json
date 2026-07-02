@@ -8,7 +8,7 @@
             "type": "command",
             "async": true,
             "timeout": 10,
-            "command": "pgrep -f 'session-recall index' >/dev/null 2>&1 || (session-recall index >/tmp/session-recall-index.log 2>&1 &)"
+            "command": "pgrep -f 'session-recall index' >/dev/null 2>&1 || { command -v session-recall >/dev/null 2>&1 && (session-recall index >/tmp/session-recall-index.log 2>&1 &) || echo 'session-recall: CLI not on PATH - index not refreshed (see README: Keeping the index fresh)' >>/tmp/session-recall-index.log; }"
           }
         ]
       }
