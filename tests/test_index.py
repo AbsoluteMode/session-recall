@@ -136,6 +136,77 @@ def test_index_survives_per_file_embed_failure(tmp_path):
     store.close()
 
 
+def test_model_change_reembeds_everything_with_current_model(tmp_path, monkeypatch):
+    """Same-dim provider/model switch must not silently mix vector spaces (KNN
+    over mixed spaces ranks garbage). The embed fingerprint is part of every
+    file's sig — so a switch invalidates ALL files — and gates the vector-reuse
+    cache — so the re-index really re-embeds with the CURRENT model instead of
+    resurrecting old-space blobs by content_hash."""
+    from session_recall import config
+
+    class _Counting(FakeEmbedder):
+        def __init__(self):
+            super().__init__()
+            self.texts_seen = []
+
+        def embed_documents(self, texts):
+            self.texts_seen.extend(texts)
+            return super().embed_documents(texts)
+
+    projects = _corpus(tmp_path)
+    store = Store(tmp_path / "i.db")
+    emb = _Counting()
+    index_corpus(store, emb, projects)
+    assert len(emb.texts_seen) == 2
+    emb.texts_seen.clear()
+
+    monkeypatch.setattr(config, "EMBED_MODEL", "other-model-same-dim")
+    n = index_corpus(store, emb, projects)  # NO file content changed
+    assert n == 2, "fingerprint in sig must invalidate every file on model change"
+    assert sorted(emb.texts_seen) == ["We cache via an on-disk store.",
+                                      "how do we cache embeddings"], \
+        f"cache must be bypassed on fingerprint change, saw: {emb.texts_seen}"
+    store.close()
+
+
+def test_legacy_sig_migrates_without_full_reembed(tmp_path):
+    """Pre-fingerprint DBs store sig as v{N}:mtime:size. On the first run after
+    the upgrade those are grandfathered to the current fingerprint (their
+    vectors were made by the then-configured provider) — NOT re-embedded
+    wholesale, which would cost a full-corpus embed for nothing."""
+    projects = _corpus(tmp_path)
+    store = Store(tmp_path / "i.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, projects)  # writes new-format sig
+    f = str(projects / "-Users-me-proj" / "session_a.jsonl")
+    new_sig = store.db.execute(
+        "SELECT sig FROM indexed_files WHERE path = ?", (f,)).fetchone()[0]
+    legacy = "v2:" + ":".join(new_sig.split(":")[-2:])  # v2:mtime:size
+    store.db.execute("UPDATE indexed_files SET sig = ? WHERE path = ?", (legacy, f))
+    store.commit()
+    calls = emb.doc_calls
+    assert index_corpus(store, emb, projects) == 0
+    assert emb.doc_calls == calls, "legacy sig must migrate in place, not re-embed"
+    store.close()
+
+
+def test_index_survives_unstatable_file(tmp_path):
+    """A transcript that vanishes between glob and stat (broken symlink, race
+    with cleanup) must not abort the run: _file_sig stats the path, so it must
+    fail inside the per-file isolation, not before it."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    (proj / "a_broken.jsonl").symlink_to(proj / "never-existed-target.jsonl")
+    good = proj / "b_good.jsonl"
+    good.write_text('{"type":"user","uuid":"u2","sessionId":"sg",'
+                    '"message":{"role":"user","content":"healthy text"}}\n')
+    store = Store(tmp_path / "i.db")
+    n = index_corpus(store, FakeEmbedder(), tmp_path / "projects")
+    assert n == 1, "the healthy file must be indexed despite the unstatable one"
+    assert store.fts("healthy", 5)
+    store.close()
+
+
 def test_failed_reindex_keeps_previous_chunks(tmp_path):
     """A transcript grows, then its re-embed fails mid-file. The previously
     indexed chunks must survive (per-file transaction rollback) — not vanish
@@ -154,6 +225,27 @@ def test_failed_reindex_keeps_previous_chunks(tmp_path):
     index_corpus(store, _PoisonEmbedder(), tmp_path / "projects")  # re-embed fails
     assert store.fts("original", 5), \
         "previous chunks must survive a failed re-index (rollback, not a hole)"
+    store.close()
+
+
+def test_short_embedder_batch_fails_with_actionable_message(tmp_path, capsys):
+    """An embedder returning fewer vectors than texts must fail that file with a
+    real message in the unattended-hook log — a bare StopIteration stringifies
+    to '' and the stderr line would read 'path: ' with no cause."""
+    class _ShortEmbedder(FakeEmbedder):
+        def embed_documents(self, texts):
+            return super().embed_documents(texts)[:-1]  # one vector short
+
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    (proj / "s.jsonl").write_text('{"type":"user","uuid":"u1","sessionId":"sa",'
+                                  '"message":{"role":"user","content":"some text"}}\n')
+    store = Store(tmp_path / "i.db")
+    n = index_corpus(store, _ShortEmbedder(), tmp_path / "projects")
+    assert n == 0
+    err = capsys.readouterr().err
+    assert "1 file(s) failed" in err
+    assert "vector" in err, f"log line must name the cause, got: {err!r}"
     store.close()
 
 

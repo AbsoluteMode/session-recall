@@ -273,6 +273,56 @@ def test_grep_skips_missing_files_global(tmp_path):
     store.close()
 
 
+def test_grep_filters_per_turn_on_mixed_session_file(tmp_path):
+    """Resumed sessions produce files whose turns carry DIFFERENT sessionIds
+    (and possibly cwds). Session/scope filters and anchor labels must apply per
+    turn: file-level metadata reduced to one arbitrary row silently returned 0
+    hits for the second sessionId (and leaked/mislabeled cross-repo turns)."""
+    f = tmp_path / "mixed.jsonl"
+    f.write_text(
+        '{"type":"user","uuid":"o1","sessionId":"s-old","cwd":"/alpha",'
+        '"message":{"role":"user","content":"old alpha needle"}}\n'
+        '{"type":"user","uuid":"n1","sessionId":"s-new","cwd":"/beta",'
+        '"message":{"role":"user","content":"fresh beta needle"}}\n')
+    store = Store(tmp_path / "m.db")
+    store.add(*_scoped_chunk("o1", "old alpha needle", "/alpha", 0,
+                             file_path=str(f), session_id="s-old"))
+    store.add(*_scoped_chunk("n1", "fresh beta needle", "/beta", 1,
+                             file_path=str(f), session_id="s-new"))
+    r = Recall(store, FakeEmbedder(), FakeReranker())
+
+    by_sid = r.grep("needle", session_id="s-new")
+    assert by_sid and all("fresh beta" in h.snippet for h in by_sid), \
+        "grep must find turns of the SECOND sessionId in a mixed file"
+    assert all(h.session_id == "s-new" for h in by_sid), "anchor sid must be the turn's own"
+
+    scoped = r.grep("needle", scope_cwd="/beta")
+    assert scoped and all("fresh beta" in h.snippet for h in scoped), \
+        "scope must apply per turn: no misses AND no cross-repo leaks"
+    assert all(h.session_id == "s-new" for h in scoped)
+    store.close()
+
+
+def test_files_for_escapes_like_wildcards_in_session_id(tmp_path):
+    """The <session_id>.jsonl fallback interpolates session_id into a LIKE
+    pattern: an unescaped '_' (one-any-char wildcard) would resolve session
+    's_1' to a DIFFERENT session's transcript sx1.jsonl — cross-session leak."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    (proj / "sx1.jsonl").write_text(
+        '{"type":"user","uuid":"g1","sessionId":"sx1",'
+        '"message":{"role":"user","content":'
+        '"<system-reminder>other session content</system-reminder>"}}\n')
+    store = Store(tmp_path / "e.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")  # chunk-less, indexed_files only
+    r = Recall(store, emb, FakeReranker())
+    import pytest
+    with pytest.raises(LookupError):
+        r.expand_around("s_1", "g1")  # must NOT resolve to sx1.jsonl via LIKE '_'
+    store.close()
+
+
 def test_recall_search_fts_only_hits_carry_none_score(tmp_path):
     """Embedder down -> FTS-only degrade. Keyword hits have no vector distance;
     they must surface score=None (JSON null), not a fake 0.0 that reads as

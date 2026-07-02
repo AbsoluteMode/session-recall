@@ -169,8 +169,11 @@ class Store:
             "ON CONFLICT(path) DO UPDATE SET sig = excluded.sig", (path, sig))
 
     def is_indexed(self, path: str, sig: str) -> bool:
+        return self.stored_sig(path) == sig
+
+    def stored_sig(self, path: str) -> "str | None":
         row = self.db.execute("SELECT sig FROM indexed_files WHERE path = ?", (path,)).fetchone()
-        return row is not None and row[0] == sig
+        return row[0] if row else None
 
     def commit(self):
         self.db.commit()

@@ -19,7 +19,7 @@ class Recall:
         self.reranker = reranker
 
     @staticmethod
-    def _anchor(c, score: float) -> Anchor:
+    def _anchor(c, score: "float | None") -> Anchor:
         return Anchor(session_id=c.session_id, uuid=c.uuid, role=c.role,
                       snippet=_snippet(c.text), score=score, project=c.project, when=c.ts)
 
@@ -110,9 +110,11 @@ class Recall:
             files = [r[0] for r in self.store.db.execute(
                 "SELECT DISTINCT file_path FROM chunks WHERE session_id = ?",
                 (session_id,)).fetchall()]
+            escaped = (session_id.replace("\\", "\\\\")
+                       .replace("_", "\\_").replace("%", "\\%"))
             files += [r[0] for r in self.store.db.execute(
-                "SELECT path FROM indexed_files WHERE path LIKE ?",
-                ("%/" + session_id + ".jsonl",)).fetchall() if r[0] not in files]
+                "SELECT path FROM indexed_files WHERE path LIKE ? ESCAPE '\\'",
+                ("%/" + escaped + ".jsonl",)).fetchall() if r[0] not in files]
         if not files:
             raise LookupError(
                 f"no indexed transcript for uuid={uuid!r} session_id={session_id!r} "
@@ -198,39 +200,44 @@ class Recall:
     def grep(self, pattern: str, session_id: str | None = None,
              scope_cwd: str | None = None) -> list[Anchor]:
         root = repo_root(scope_cwd) if scope_cwd else None
-        # Chunk metadata where it exists — the fast path that skips whole files by
-        # session/scope without opening them.
-        meta: dict[str, tuple[str, str, str]] = {}  # path -> (session_id, project, cwd)
+        # Per-path chunk metadata. A file can carry SEVERAL (sid, cwd) pairs —
+        # resumed sessions mix sessionIds in one transcript — so this is only a
+        # fast-path skip (skip a file when NO row could match) and a fallback for
+        # turns lacking their own fields; the authoritative filter is per turn.
+        meta: dict[str, list[tuple[str, str, str]]] = {}  # path -> [(sid, project, cwd)]
         for sid, path, project, cwd in self.store.db.execute(
                 "SELECT DISTINCT session_id, file_path, project, cwd FROM chunks").fetchall():
-            meta.setdefault(path, (sid, project, cwd))
+            meta.setdefault(path, []).append((sid, project, cwd))
         # Scan ALL indexed transcripts, not just chunk-bearing ones: a file whose
         # every turn was filtered at extract (harness boilerplate, tool-only) is
-        # exactly the under-the-hood content grep exists for. Chunk-less files are
-        # filtered per-turn on the raw sessionId/cwd fields instead.
+        # exactly the under-the-hood content grep exists for.
         paths = [r[0] for r in self.store.db.execute(
             "SELECT path FROM indexed_files").fetchall()]
-        paths += [p for p in meta if p not in set(paths)]  # ad-hoc stores / legacy rows
+        known = set(paths)
+        paths += [p for p in meta if p not in known]  # ad-hoc stores / legacy rows
         hits: list[Anchor] = []
         for path in paths:
-            m = meta.get(path)
-            if m is not None:
-                sid0, project0, cwd0 = m
-                if session_id and sid0 != session_id:
+            rows = meta.get(path)
+            if rows:
+                if session_id and not any(s == session_id for s, _, _ in rows):
                     continue
-                if root and not in_scope(cwd0, root):
+                if root and not any(in_scope(c, root) for _, _, c in rows):
                     continue
             for o in self._read_turns(path):
-                if m is None:
-                    if session_id and o.get("sessionId") != session_id:
-                        continue
-                    if root and not in_scope(o.get("cwd", ""), root):
-                        continue
+                t_sid = o.get("sessionId") or (rows[0][0] if rows else "")
+                if session_id and t_sid != session_id:
+                    continue
+                t_cwd = o.get("cwd")
+                if root:
+                    if t_cwd:
+                        if not in_scope(t_cwd, root):
+                            continue  # turn provably outside the repo (mixed-cwd file)
+                    elif not rows:
+                        continue  # chunk-less file, no cwd evidence -> not provably in scope
                 blob = json.dumps(o, ensure_ascii=False)
                 if pattern in blob:
-                    sid, project = (m[0], m[1]) if m is not None else \
-                        (o.get("sessionId", ""), project_label(o.get("cwd", "")))
-                    hits.append(Anchor(session_id=sid, uuid=o.get("uuid", ""),
+                    project = project_label(t_cwd) if t_cwd else (rows[0][1] if rows else "")
+                    hits.append(Anchor(session_id=t_sid, uuid=o.get("uuid", ""),
                                        role=o.get("type", ""), snippet=_snippet(blob),
                                        score=1.0, project=project, when=0))
         return hits

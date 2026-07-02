@@ -34,7 +34,9 @@ logged and retried on the next run, never aborting the rest. Subagent sidechains
 not conversation.
 
 Embeddings are pluggable (Voyage is the default); the reranker is optional, and the
-system degrades gracefully to KNN + FTS without one.
+system degrades gracefully to KNN + FTS without one. Switching the embedding
+provider/model is detected (an embed fingerprint is part of each file's index
+signature) and triggers a clean re-embed instead of silently mixing vector spaces.
 
 ## Install / run
 
