@@ -46,6 +46,13 @@ def scope_clause(column: str, root: str | None) -> tuple[str, list[str]]:
     return sql, [root, escaped + "/%"]
 
 
+def in_scope(cwd: str, root: str) -> bool:
+    """Python twin of scope_clause (same boundary rule, applied to raw turn
+    fields when a transcript has no chunk rows to filter in SQL): cwd is the
+    root itself or strictly under `root/` — never a sibling like `root-backend`."""
+    return cwd == root or cwd.startswith(root + "/")
+
+
 def project_label(cwd: str) -> str:
     """Human-readable project label: basename of the repo root (worktrees
     collapsed to the parent repo). Fixes a worktree cwd resolving to a junk

@@ -22,7 +22,7 @@ class Anchor:
     uuid: str
     role: str
     snippet: str
-    score: float
+    score: "float | None"  # None = keyword-only hit (no vector distance, no rerank)
     project: str
     when: int
 

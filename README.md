@@ -6,7 +6,8 @@ agent five tools (via MCP) so it can resume past work instead of making you re-e
 - `recall_search(query)` — find a past discussion **by meaning** (not substring).
 - `expand_around(session_id, uuid)` — a cursor into the raw turn (tool calls, outputs, thinking).
 - `step(session_id, uuid, direction)` — move to an adjacent turn (cheap cursor step).
-- `grep(pattern)` — on-demand substring scan over the raw transcripts.
+- `grep(pattern)` — on-demand substring scan over **all** indexed transcripts, including
+  under-the-hood turns (tool output, thinking) that never became search chunks.
 - `recent_sessions()` — the freshest past sessions first (what's current, how fresh the index is).
 
 On-demand (no proactive auto-injection in v1). Local, open source.
@@ -24,9 +25,13 @@ timestamp alongside the raw epoch.
 Only the conversation "surface" is indexed — user prompts and assistant text replies.
 `tool_result` / `thinking` / harness noise are not embedded but stay reachable via
 `expand_around` / `grep`. Embeddings: Voyage `voyage-4-large` (dim 1024) → SQLite
-(`sqlite-vec` KNN + FTS5) → Voyage `rerank-2.5` → top-k. Indexing is incremental
-(by mtime+size). Subagent sidechains (`<session>/subagents/`) are intentionally skipped —
-that's under-the-hood tooling, not conversation.
+(`sqlite-vec` KNN + FTS5, bm25-ranked) → Voyage `rerank-2.5` → top-k. Indexing is
+incremental (by mtime+size) and cheap on live transcripts: they are append-only, so
+unchanged chunks are matched by content hash and their vectors reused — only new turns
+hit the embedding API. Each file indexes in its own transaction; a failing file is
+logged and retried on the next run, never aborting the rest. Subagent sidechains
+(`<session>/subagents/`) are intentionally skipped — that's under-the-hood tooling,
+not conversation.
 
 Embeddings are pluggable (Voyage is the default); the reranker is optional, and the
 system degrades gracefully to KNN + FTS without one.
@@ -39,6 +44,9 @@ export VOYAGE_API_KEY=...                        # your Voyage key
 
 .venv/bin/session-recall index                   # index ~/.claude/projects
 .venv/bin/session-recall search "query"          # semantic search from the CLI
+.venv/bin/session-recall recent                  # freshest sessions (is the index current?)
+.venv/bin/session-recall grep "exact string"     # raw substring scan, no API needed
+.venv/bin/session-recall prune                   # drop rows for deleted transcripts
 ```
 
 ### Connect to Claude Code (MCP)
@@ -83,3 +91,6 @@ This is a public repository. **Only code goes in it.**
   **outside the repo tree**. They physically cannot be committed.
 - API keys → environment only (`VOYAGE_API_KEY`); `.gitignore` blocks `.env`.
 - Tests → synthetic fixtures only, never a real slice of a session.
+- Chunk texts ARE sent to your configured embedding/rerank provider (Voyage by
+  default) — pick a provider you trust with your transcripts, or point the
+  OpenAI-compatible provider at a local endpoint.

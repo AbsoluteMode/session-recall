@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from .extract import extract_file, EXTRACTOR_VERSION
 from .store import Store
@@ -19,6 +20,7 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path) -> int:
     # chunks would otherwise linger in the index forever.
     store.prune_deleted()
     new_count = 0
+    failed: list[str] = []
     for project_dir in sorted(Path(projects_dir).iterdir()):
         if not project_dir.is_dir():
             continue
@@ -33,14 +35,34 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path) -> int:
             sig = _file_sig(jsonl)
             if store.is_indexed(str(jsonl), sig):
                 continue
-            # Changed file (or version bump): drop stale rows before re-adding so a
-            # growing transcript never accumulates duplicate chunks. No-op if new.
-            store.delete_file(str(jsonl))
-            chunks = extract_file(str(jsonl), project=project)
-            if chunks:
-                vectors = embedder.embed_documents([c.text for c in chunks])
-                for chunk, vec in zip(chunks, vectors):
-                    store.add(chunk, vec)
+            # One transaction per file: delete + re-add + mark commit together, so
+            # a failure mid-file (embedding API down, broken transcript) rolls back
+            # to the previous good state — never a half-indexed hole. And one bad
+            # file must not abort the run: log it, retry on the next run (its sig
+            # stays unmarked), keep indexing the rest.
+            try:
+                # Transcripts are append-only: reuse the vectors of unchanged chunks
+                # (matched by content_hash) and only embed genuinely new texts —
+                # otherwise every hook run re-embeds the whole live transcript.
+                # WHY: docs/decisions/2026-07-02-post-review-hardening.md
+                cached = store.embeddings_by_hash(str(jsonl))
+                # Changed file (or version bump): drop stale rows before re-adding so
+                # a growing transcript never accumulates duplicate chunks. No-op if new.
+                store.delete_file(str(jsonl))
+                chunks = extract_file(str(jsonl), project=project)
+                if chunks:
+                    new_texts = [c.text for c in chunks if c.content_hash not in cached]
+                    new_vecs = iter(embedder.embed_documents(new_texts) if new_texts else [])
+                    for chunk in chunks:
+                        reused = cached.get(chunk.content_hash)
+                        store.add(chunk, reused if reused is not None else next(new_vecs))
+                store.mark_indexed(str(jsonl), sig)
+                store.commit()
                 new_count += len(chunks)
-            store.mark_indexed(str(jsonl), sig)
+            except Exception as e:
+                store.rollback()
+                failed.append(f"{jsonl}: {e}")
+    if failed:
+        print(f"session-recall: {len(failed)} file(s) failed to index (will retry "
+              f"next run):\n  " + "\n  ".join(failed[:10]), file=sys.stderr)
     return new_count
