@@ -1,0 +1,12 @@
+{"timestamp":"2026-07-01T10:00:00Z","type":"session_meta","payload":{"id":"codex-s1","session_id":"codex-s1","cwd":"/Users/me/repo","source":"vscode","thread_source":"user"}}
+{"timestamp":"2026-07-01T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>generated cwd</environment_context>"},{"type":"input_text","text":"<recommended_plugins>generated list</recommended_plugins>"}]}}
+{"timestamp":"2026-07-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"How do we cache vectors?"}]}}
+{"timestamp":"2026-07-01T10:00:03Z","type":"event_msg","payload":{"type":"user_message","message":"How do we cache vectors?"}}
+{"timestamp":"2026-07-01T10:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Use a durable SQLite cache."}],"phase":"commentary"}}
+{"timestamp":"2026-07-01T10:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"Use a durable SQLite cache.","phase":"commentary"}}
+{"timestamp":"2026-07-01T10:00:06Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Preserve vectors for unchanged chunks."}],"encrypted_content":"ciphertext-must-never-escape"}}
+{"timestamp":"2026-07-01T10:00:07Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pytest\"}","call_id":"call-1"}}
+{"timestamp":"2026-07-01T10:00:08Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"81 passed"}}
+{"timestamp":"2026-07-01T10:00:09Z","type":"session_meta","payload":{"id":"must-not-replace-first-id","cwd":"/Users/me/repo-2","source":"vscode","thread_source":"user"}}
+{"timestamp":"2026-07-01T10:00:10Z","type":"event_msg","payload":{"type":"user_message","message":"What about archived sessions?"}}
+{"timestamp":"2026-07-01T10:00:11Z","type":"event_msg","payload":{"type":"agent_message","message":"Scan the archived rollout directory too.","phase":"final"}}

@@ -13,7 +13,7 @@ from .scope import scope_clause
 
 _COLS = ["session_id", "uuid", "role", "text", "project", "cwd",
          "git_branch", "ts", "file_path", "byte_offset", "byte_len",
-         "turn_index", "content_hash"]
+         "turn_index", "content_hash", "source"]
 _INT_COLS = {"ts", "byte_offset", "byte_len", "turn_index"}
 
 
@@ -27,15 +27,36 @@ class Store:
         self._schema()
 
     def _schema(self):
-        col_defs = ", ".join(f"{c} INTEGER" if c in _INT_COLS else f"{c} TEXT" for c in _COLS)
+        col_defs = ", ".join(
+            (f"{c} INTEGER" if c in _INT_COLS else
+             "source TEXT NOT NULL DEFAULT 'claude'" if c == "source" else
+             f"{c} TEXT")
+            for c in _COLS
+        )
         self.db.execute(f"CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, {col_defs})")
+        # v0.3 adds transcript provenance without rebuilding the (potentially
+        # very large) vector index. Existing rows are Claude Code history.
+        chunk_cols = {row[1] for row in self.db.execute("PRAGMA table_info(chunks)")}
+        if "source" not in chunk_cols:
+            self.db.execute(
+                "ALTER TABLE chunks ADD COLUMN source TEXT NOT NULL DEFAULT 'claude'")
         self.db.execute(
             f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0("
             f"chunk_id INTEGER PRIMARY KEY, embedding FLOAT[{EMBED_DIM}])")
         self.db.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(text, chunk_id UNINDEXED)")
         self.db.execute(
-            "CREATE TABLE IF NOT EXISTS indexed_files(path TEXT PRIMARY KEY, sig TEXT)")
+            "CREATE TABLE IF NOT EXISTS indexed_files("
+            "path TEXT PRIMARY KEY, sig TEXT, source TEXT NOT NULL DEFAULT 'claude')")
+        indexed_cols = {row[1] for row in self.db.execute("PRAGMA table_info(indexed_files)")}
+        if "source" not in indexed_cols:
+            self.db.execute(
+                "ALTER TABLE indexed_files ADD COLUMN source TEXT NOT NULL DEFAULT 'claude'")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_source_session "
+            "ON chunks(source, session_id)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)")
         self.db.commit()
 
     def add(self, chunk: Chunk, embedding: "list[float] | bytes") -> int:
@@ -64,6 +85,20 @@ class Store:
             "SELECT c.content_hash, v.embedding FROM chunks c "
             "JOIN vec_chunks v ON v.chunk_id = c.id WHERE c.file_path = ?", (path,))}
 
+    def embeddings_by_session(self, session_id: str, source: str,
+                              sig_prefix: str) -> dict[str, bytes]:
+        """Reuse vectors when a transcript moves (for example into Codex's
+        archive directory). Only rows whose file signature proves the current
+        extractor/embedding space are eligible."""
+        return {content_hash: embedding for content_hash, embedding in self.db.execute(
+            "SELECT c.content_hash, v.embedding FROM chunks c "
+            "JOIN vec_chunks v ON v.chunk_id = c.id "
+            "JOIN indexed_files f ON f.path = c.file_path "
+            "WHERE c.session_id = ? AND c.source = ? "
+            "AND substr(f.sig, 1, ?) = ?",
+            (session_id, source, len(sig_prefix), sig_prefix),
+        )}
+
     def delete_file(self, path: str):
         """Remove all chunks (+ their vec/fts rows) for a file. Called before
         re-indexing a changed file so a growing transcript does not accumulate
@@ -77,13 +112,19 @@ class Store:
             self.db.execute(f"DELETE FROM fts_chunks WHERE chunk_id IN ({marks})", ids)
             self.db.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
 
-    def prune_deleted(self) -> int:
-        """Drop index rows for transcripts that no longer exist on disk. A deleted
+    def prune_deleted(self, source: str | None = None) -> int:
+        """Drop index rows for transcripts that no longer exist on disk.
+
+        ``source`` limits reconciliation to one producer; this matters for a
+        source-selective refresh. A deleted
         file is never re-visited by index_corpus (it only walks existing files), so
         without this its chunks linger forever — polluting recall_search results and
         (pre-resilience) crashing grep on open(). Returns the number of files pruned.
         WHY: docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md"""
-        gone = [r[0] for r in self.db.execute("SELECT path FROM indexed_files").fetchall()
+        source_sql = " WHERE source = ?" if source else ""
+        params = (source,) if source else ()
+        gone = [r[0] for r in self.db.execute(
+                f"SELECT path FROM indexed_files{source_sql}", params).fetchall()
                 if not Path(r[0]).exists()]
         for path in gone:
             self.delete_file(path)  # chunks + vec + fts
@@ -91,34 +132,48 @@ class Store:
         self.db.commit()
         return len(gone)
 
-    def knn(self, query_vec: list[float], n: int, scope_root: str | None = None) -> list[tuple[int, float]]:
-        clause, params = scope_clause("c.cwd", scope_root)
+    @staticmethod
+    def _filters(scope_root: str | None, source: str | None,
+                 *, alias: str = "c") -> tuple[str, list[str]]:
+        clauses: list[str] = []
+        params: list[str] = []
+        scope, scope_params = scope_clause(f"{alias}.cwd", scope_root)
+        if scope:
+            clauses.append(scope)
+            params.extend(scope_params)
+        if source:
+            clauses.append(f"{alias}.source = ?")
+            params.append(source)
+        return " AND ".join(clauses), params
+
+    def knn(self, query_vec: list[float], n: int, scope_root: str | None = None,
+            source: str | None = None) -> list[tuple[int, float]]:
+        clause, params = self._filters(scope_root, source)
         if not clause:
             rows = self.db.execute(
                 "SELECT chunk_id, distance FROM vec_chunks "
                 "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
                 (sqlite_vec.serialize_float32(query_vec), n)).fetchall()
             return [(r[0], r[1]) for r in rows]
-        # Scoped: vec0 KNN can't pre-filter on a joined column, so over-fetch
-        # candidates then filter to the repo, keeping the top n. The brute-force
-        # scan cost is independent of k, so over-fetching is ~free; clamp so a
-        # repo that is a tiny slice of the corpus still gets enough survivors.
-        total = self.db.execute("SELECT count(*) FROM chunks").fetchone()[0]
-        k_over = min(total, max(300, min(n * 30, 2000)))
+        # sqlite-vec supports an IN-subquery prefilter on the vec0 primary key.
+        # Keep the metadata predicate inside that subquery: filtering only
+        # after a global top-k can starve a small source/repo, while asking for
+        # the whole corpus exceeds sqlite-vec 0.1.9's k<=4096 limit.
         rows = self.db.execute(
-            f"SELECT vec_chunks.chunk_id, vec_chunks.distance FROM vec_chunks "
-            f"JOIN chunks c ON c.id = vec_chunks.chunk_id "
-            f"WHERE vec_chunks.embedding MATCH ? AND k = ? AND {clause} "
-            f"ORDER BY vec_chunks.distance LIMIT ?",
-            (sqlite_vec.serialize_float32(query_vec), k_over, *params, n)).fetchall()
+            f"SELECT chunk_id, distance FROM vec_chunks "
+            f"WHERE embedding MATCH ? AND k = ? "
+            f"AND chunk_id IN (SELECT c.id FROM chunks c WHERE {clause}) "
+            f"ORDER BY distance",
+            (sqlite_vec.serialize_float32(query_vec), n, *params)).fetchall()
         return [(r[0], r[1]) for r in rows]
 
-    def fts(self, query: str, n: int, scope_root: str | None = None) -> list[int]:
+    def fts(self, query: str, n: int, scope_root: str | None = None,
+            source: str | None = None) -> list[int]:
         terms = [t for t in query.split() if t]
         if not terms:
             return []
         match = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
-        clause, params = scope_clause("c.cwd", scope_root)
+        clause, params = self._filters(scope_root, source)
         # ORDER BY rank (bm25, best first) — without it FTS5 returns rowid order
         # and LIMIT keeps an arbitrary oldest slice instead of the best matches.
         if not clause:
@@ -143,36 +198,46 @@ class Store:
             data[k] = int(data[k])
         return Chunk(**data)
 
-    def recent_sessions(self, scope_root: str | None, limit: int) -> list[tuple]:
+    def recent_sessions(self, scope_root: str | None, limit: int,
+                        source: str | None = None) -> list[tuple]:
         """Sessions by most-recent activity (max ts), optionally scoped to a repo.
-        Returns (session_id, project, last_ts, turns). Tiebreak on session_id so
-        equal-timestamp ordering is deterministic."""
-        clause, params = scope_clause("cwd", scope_root)
+        Returns (source, session_id, project, last_ts, turns). Tiebreaks make
+        equal-timestamp ordering deterministic."""
+        clause, params = self._filters(scope_root, source, alias="chunks")
         where = f" WHERE {clause}" if clause else ""
         return self.db.execute(
-            f"SELECT session_id, project, max(ts) AS last_ts, count(*) AS turns "
-            f"FROM chunks{where} GROUP BY session_id ORDER BY last_ts DESC, session_id LIMIT ?",
+            f"SELECT source, session_id, project, max(ts) AS last_ts, count(*) AS turns "
+            f"FROM chunks{where} GROUP BY source, session_id "
+            f"ORDER BY last_ts DESC, source, session_id LIMIT ?",
             (*params, limit)).fetchall()
 
-    def first_user_text(self, session_id: str) -> str:
+    def first_user_text(self, session_id: str, source: str | None = None) -> str:
         """The session's earliest user prompt — a human label for the session."""
+        source_sql = " AND source = ?" if source else ""
+        params = (session_id, source) if source else (session_id,)
         row = self.db.execute(
             "SELECT text FROM chunks WHERE session_id = ? AND role = 'user' "
-            "ORDER BY turn_index LIMIT 1", (session_id,)).fetchone()
+            f"{source_sql} ORDER BY turn_index LIMIT 1", params).fetchone()
         return row[0] if row else ""
 
-    def mark_indexed(self, path: str, sig: str):
+    def mark_indexed(self, path: str, sig: str, source: str = "claude"):
         # Not committed here — joins the caller's per-file transaction, so the
         # "indexed" marker can never outlive a rolled-back set of chunks.
         self.db.execute(
-            "INSERT INTO indexed_files(path, sig) VALUES (?, ?) "
-            "ON CONFLICT(path) DO UPDATE SET sig = excluded.sig", (path, sig))
+            "INSERT INTO indexed_files(path, sig, source) VALUES (?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET sig = excluded.sig, source = excluded.source",
+            (path, sig, source))
 
     def is_indexed(self, path: str, sig: str) -> bool:
         return self.stored_sig(path) == sig
 
     def stored_sig(self, path: str) -> "str | None":
         row = self.db.execute("SELECT sig FROM indexed_files WHERE path = ?", (path,)).fetchone()
+        return row[0] if row else None
+
+    def indexed_source(self, path: str) -> "str | None":
+        row = self.db.execute(
+            "SELECT source FROM indexed_files WHERE path = ?", (path,)).fetchone()
         return row[0] if row else None
 
     def commit(self):

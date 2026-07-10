@@ -15,6 +15,9 @@ class Chunk:
     byte_len: int
     turn_index: int
     content_hash: str
+    # Transcript producer. Kept last with a default so callers constructing
+    # synthetic/legacy chunks remain source-compatible.
+    source: str = "claude"
 
 @dataclass
 class Anchor:
@@ -27,6 +30,7 @@ class Anchor:
     score: "float | None"
     project: str
     when: int
+    source: str = "claude"
 
 @dataclass
 class Turn:
@@ -34,3 +38,4 @@ class Turn:
     type: str
     content: str
     raw: dict
+    source: str = "claude"

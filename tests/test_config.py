@@ -13,6 +13,16 @@ def test_model_constants():
     assert config.EMBED_DIM == 1024
     assert config.RERANK_MODEL == "rerank-2.5"
 
+
+def test_codex_roots_follow_codex_home(monkeypatch, tmp_path):
+    import importlib
+    with monkeypatch.context() as scoped:
+        scoped.setenv("CODEX_HOME", str(tmp_path / "custom-codex"))
+        importlib.reload(config)
+        assert config.CODEX_SESSIONS == tmp_path / "custom-codex" / "sessions"
+        assert config.CODEX_ARCHIVED_SESSIONS == tmp_path / "custom-codex" / "archived_sessions"
+    importlib.reload(config)
+
 def test_chunk_dataclass():
     c = Chunk(session_id="s", uuid="u", role="user", text="hi", project="p",
               cwd="/c", git_branch="b", ts=1, file_path="/f.jsonl",

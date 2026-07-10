@@ -77,6 +77,7 @@ def test_grep_forwards_scope_cwd(tmp_path, monkeypatch):
     store.add(*_mk("u1", "needle", "/Users/me/repoA", 0, file_path=str(fa), session_id="sa"))
     store.add(*_mk("u2", "needle", "/Users/me/repoB", 1, file_path=str(fb), session_id="sb"))
     monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
-    out = server.grep("needle", scope_cwd="/Users/me/repoA")
+    out = server.grep("needle", scope_cwd="/Users/me/repoA", limit=1)
     assert out and all(o["session_id"] == "sa" for o in out), "server did not forward scope_cwd to grep"
+    assert len(out) == 1
     store.close()

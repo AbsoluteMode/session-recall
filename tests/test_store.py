@@ -1,5 +1,6 @@
 from session_recall.store import Store
 from session_recall.models import Chunk
+import sqlite3
 
 def _chunk(uuid, text):
     return Chunk(session_id="s", uuid=uuid, role="user", text=text, project="p",
@@ -30,6 +31,74 @@ def test_indexed_marker(tmp_path):
     s.mark_indexed("/f.jsonl", "sig1")
     assert s.is_indexed("/f.jsonl", "sig1")
     assert not s.is_indexed("/f.jsonl", "sig2")  # changed signature
+    s.close()
+
+
+def test_source_provenance_defaults_and_filters(tmp_path):
+    s = Store(tmp_path / "sources.db")
+    claude = _chunk("c1", "shared memory from claude")
+    codex = _chunk("x1", "shared memory from codex")
+    codex.source = "codex"
+    c_id = s.add(claude, [1.0] + [0.0] * 1023)
+    x_id = s.add(codex, [0.0, 1.0] + [0.0] * 1022)
+
+    assert s.get_chunk(c_id).source == "claude"
+    assert s.get_chunk(x_id).source == "codex"
+    assert [cid for cid, _ in s.knn([1.0] + [0.0] * 1023, 5,
+                                     source="codex")] == [x_id]
+    assert s.fts("memory", 5, source="claude") == [c_id]
+    assert s.fts("memory", 5, source="codex") == [x_id]
+    s.close()
+
+
+def test_indexed_file_records_source(tmp_path):
+    s = Store(tmp_path / "sources.db")
+    s.mark_indexed("/codex.jsonl", "sig", source="codex")
+    assert s.indexed_source("/codex.jsonl") == "codex"
+    s.close()
+
+
+def test_existing_claude_database_migrates_source_columns_in_place(tmp_path):
+    """The shared-source upgrade must preserve a v0.2 Claude-only database."""
+    path = tmp_path / "legacy.db"
+    db = sqlite3.connect(path)
+    db.execute(
+        "CREATE TABLE chunks(id INTEGER PRIMARY KEY, session_id TEXT, uuid TEXT, "
+        "role TEXT, text TEXT, project TEXT, cwd TEXT, git_branch TEXT, ts INTEGER, "
+        "file_path TEXT, byte_offset INTEGER, byte_len INTEGER, turn_index INTEGER, "
+        "content_hash TEXT)"
+    )
+    db.execute(
+        "INSERT INTO chunks(session_id, uuid, role, text, project, cwd, git_branch, ts, "
+        "file_path, byte_offset, byte_len, turn_index, content_hash) "
+        "VALUES ('s', 'u', 'user', 'legacy text', 'p', '/p', '', 1, '/old.jsonl', 0, 1, 0, 'h')"
+    )
+    db.execute("CREATE TABLE indexed_files(path TEXT PRIMARY KEY, sig TEXT)")
+    db.execute("INSERT INTO indexed_files VALUES ('/old.jsonl', 'v2:1:1')")
+    db.commit()
+    db.close()
+
+    store = Store(path)
+    assert store.db.execute("SELECT source FROM chunks").fetchone()[0] == "claude"
+    assert store.indexed_source("/old.jsonl") == "claude"
+    assert store.get_chunk(1).source == "claude"
+    store.close()
+
+
+def test_knn_source_filter_cannot_starve_a_small_source(tmp_path):
+    """A small Codex corpus must remain searchable even when hundreds of
+    closer Claude vectors precede it in the global KNN order."""
+    s = Store(tmp_path / "starvation.db")
+    close = [1.0] + [0.0] * 1023
+    far = [0.0, 1.0] + [0.0] * 1022
+    for i in range(305):
+        s.add(_chunk(f"c{i}", f"claude {i}"), close)
+    codex = _chunk("codex-only", "rare codex memory")
+    codex.source = "codex"
+    codex_id = s.add(codex, far)
+
+    hits = s.knn(close, n=1, source="codex")
+    assert hits and hits[0][0] == codex_id
     s.close()
 
 def test_fts_or_join_non_adjacent_terms(tmp_path):

@@ -1,0 +1,42 @@
+{
+  "name": "session-recall",
+  "version": "0.3.0+codex.20260710121949",
+  "description": "Shared semantic recall over local Claude Code and Codex session history.",
+  "author": {
+    "name": "max"
+  },
+  "homepage": "https://github.com/AbsoluteMode/session-recall",
+  "repository": "https://github.com/AbsoluteMode/session-recall",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "recall",
+    "sessions",
+    "claude-code",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "session-recall": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; exec session-recall-mcp"
+      ]
+    }
+  },
+  "interface": {
+    "displayName": "Session Recall",
+    "shortDescription": "Recall work from Claude Code and Codex.",
+    "longDescription": "Search one local semantic index of your Claude Code and Codex sessions, then drill into the original conversational trace.",
+    "developerName": "max",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Recall what we decided about this task.",
+      "Find the latest session for this project."
+    ]
+  }
+}

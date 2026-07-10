@@ -10,6 +10,8 @@ def test_cli_index_then_search(tmp_path, monkeypatch, capsys):
     proj.mkdir(parents=True)
     shutil.copy("tests/fixtures/session_a.jsonl", proj / "session_a.jsonl")
     monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "projects")
+    monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
+    monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
     monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(cli, "make_reranker", lambda: __import__("session_recall.rerank", fromlist=["FakeReranker"]).FakeReranker())
@@ -26,6 +28,8 @@ def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
     proj.mkdir(parents=True)
     shutil.copy("tests/fixtures/session_a.jsonl", proj / "session_a.jsonl")
     monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "projects")
+    monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
+    monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
     monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(cli, "make_reranker", lambda: None)
@@ -36,7 +40,7 @@ def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "sa" in out and "cache embeddings" in out  # session id + first-prompt label
 
-    cli.main(["grep", "tool output not human"])
+    cli.main(["grep", "tool output not human", "--limit", "1"])
     out = capsys.readouterr().out
     assert "u2" in out  # the tool_result turn's uuid
 

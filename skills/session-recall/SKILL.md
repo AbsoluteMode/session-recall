@@ -1,40 +1,34 @@
 ---
 name: session-recall
-description: Use at the START of a task when the user references a bug, feature, decision, file, or piece of work you may have discussed or built together in a PAST session — before assuming you have fresh context. Searches prior Claude Code session history so you resume with the real prior context instead of starting cold. Triggers include "remember when…", "we worked on…", "the X bug", "back to…", "what did we decide about…", or any task that plausibly has history.
+description: Search the unified local history of past Claude Code and Codex sessions at the START of a task when the user references a prior bug, feature, decision, file, or piece of work. Use before assuming fresh context for prompts such as "remember when…", "we worked on…", "the X bug", "back to…", "what did we decide about…", or any task that plausibly has history.
 ---
 
 # Session Recall
 
-You have a searchable memory of past Claude Code sessions. Use it so the user does not have to
-re-explain things you already worked through together.
+Use the shared Claude Code + Codex index so the user does not have to re-explain prior work.
+Treat each result's `source` (`claude` or `codex`) as provenance, not relevance.
 
-## When to use
-At the start of a task that plausibly has prior history — the user references past work, a named
-bug/feature, a prior decision, or a file you may have touched before. When the task feels
-familiar, check; it is cheap.
+## Recall workflow
 
-Do NOT use for brand-new tasks with no plausible history, or trivial one-offs.
+1. Start with `recall_search`; use `recent_sessions` first when the request is about the latest
+   state or index freshness.
+2. Pass `scope_cwd` for repo-local questions. Omit it for cross-project recall; retry globally if
+   a scoped search is thin.
+3. Pass `source="claude"` or `source="codex"` only when the user names a host or provenance
+   matters. Omit `source` to search the unified history; preserve it through expansion and
+   stepping when one is selected.
+4. For deeper grounding, inspect the best anchors with `expand_around`, walk with `step`, and use
+   `grep` for exact identifiers that semantic search misses.
 
-## Two ways to recall (pick by depth)
-- **Quick check** — call the `recall_search` tool yourself (from the session-recall MCP server).
-  Good for "did we ever discuss X?": ranked snippets in one call. The `recent_sessions` tool lists
-  the freshest past sessions when you want "what's the latest / how current is the index".
-- **Deep grounding** — dispatch the **`recall` subagent** (Agent tool,
-  `subagent_type: session-recall:recall`) with the topic. It searches deeply, reads the raw arc
-  itself, and returns ONLY a tight brief (task / decisions+why / tried-rejected / current state /
-  pointers) — keeping YOUR context clean. Use this to genuinely resume a task, not just find a
-  snippet.
+## Deep-recall execution
 
-## Scoping to the current project
-`recall_search`, `grep` and `recent_sessions` take an optional `scope_cwd`. Pass your current working directory to
-restrict results to the current project/repo — worktrees collapse to the repo root automatically,
-so the main checkout and every worktree share one scope. This cuts cross-project noise and sharpens
-the top hits; make it your default for repo-local questions.
-- **Quick check:** call `recall_search("<topic>", scope_cwd="<your cwd>")`.
-- **Deep grounding:** the `recall` subagent has no shell, so include your current working directory
-  in the dispatch prompt and tell it to scope to that repo.
-- **Omit `scope_cwd`** when you WANT cross-project recall ("how did I solve this in another repo").
-  If a scoped search returns little or nothing, retry without it for a global search.
+- If the current host exposes a dedicated recall subagent, dispatch it with the topic, current
+  working directory, and any requested source filter. In Claude Code this may be
+  `session-recall:recall`.
+- If the host does not expose that subagent, perform the same deep search directly and
+  iteratively with the MCP tools. Never require a Claude-only subagent from Codex or another host.
+- Return a tight brief: task, key decisions and why, tried/rejected approaches, current state, and
+  `source` + `session_id` + `uuid` pointers.
 
 ## After recalling
 - Ground your response in what you find; cite the prior decision and its WHY when relevant.

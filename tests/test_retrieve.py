@@ -36,6 +36,12 @@ def test_grep_scans_raw(tmp_path):
     assert hits and hits[0].session_id == "sa"
 
 
+def test_grep_limit_bounds_results(tmp_path):
+    r = _built(tmp_path)
+    assert len(r.grep("type", limit=1)) == 1
+    assert r.grep("type", limit=0) == []
+
+
 def test_expand_around_resolves_grep_uuid_not_in_chunks(tmp_path):
     """grep returns uuids of raw turns that never became chunks (tool_result-only
     turns, filtered boilerplate). expand_around must resolve the transcript via
@@ -303,6 +309,83 @@ def test_grep_filters_per_turn_on_mixed_session_file(tmp_path):
     store.close()
 
 
+def test_grep_finds_and_expands_raw_only_secondary_session(tmp_path):
+    """A mixed Claude transcript may contain a secondary session/cwd only in
+    filtered tool traffic, with no chunk metadata and no matching filename."""
+    import json
+    f = tmp_path / "primary-file.jsonl"
+    rows = [
+        {"type": "user", "uuid": "primary", "sessionId": "s-primary",
+         "cwd": "/alpha", "message": {"role": "user", "content": "surface"}},
+        {"type": "user", "uuid": "raw-secondary", "sessionId": "s-secondary",
+         "cwd": "/beta", "message": {"role": "user", "content": [
+             {"type": "tool_result", "content": "RAW_SECONDARY_NEEDLE"},
+         ]}},
+    ]
+    f.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    projects = tmp_path / "projects" / "-Users-me-primary"
+    projects.mkdir(parents=True)
+    target = projects / f.name
+    target.write_bytes(f.read_bytes())
+    store = Store(tmp_path / "raw-secondary.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")
+
+    recall = Recall(store, emb, None)
+    hits = recall.grep(
+        "RAW_SECONDARY_NEEDLE",
+        session_id="s-secondary",
+        scope_cwd="/beta",
+        source="claude",
+    )
+    assert hits and hits[0].uuid == "raw-secondary"
+    assert recall.expand_around(
+        "s-secondary", "raw-secondary", source="claude")
+
+    # A new MCP process has no in-memory grep hint; the streaming locator must
+    # still resolve the raw-only anchor.
+    restarted = Recall(store, emb, None)
+    expanded = restarted.expand_around(
+        "s-secondary", "raw-secondary", source="claude")
+    assert expanded and any(
+        "RAW_SECONDARY_NEEDLE" in turn.content for turn in expanded
+    )
+    store.close()
+
+
+def test_restart_locator_checks_other_file_when_session_has_surface_elsewhere(tmp_path):
+    """A session-id candidate is only a guess: its raw-only anchor may live in
+    another mixed Claude transcript and must still resolve after MCP restart."""
+    import json
+
+    project = tmp_path / "projects" / "-Users-me-mixed"
+    project.mkdir(parents=True)
+    mixed_rows = [
+        {"type": "user", "uuid": "other-surface", "sessionId": "other",
+         "cwd": "/repo", "message": {"role": "user", "content": "surface"}},
+        {"type": "user", "uuid": "raw-target", "sessionId": "shared",
+         "cwd": "/repo", "message": {"role": "user", "content": [
+             {"type": "tool_result", "content": "CROSS_FILE_RAW_NEEDLE"},
+         ]}},
+    ]
+    (project / "a-mixed.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in mixed_rows))
+    (project / "b-surface.jsonl").write_text(json.dumps({
+        "type": "user", "uuid": "shared-surface", "sessionId": "shared",
+        "cwd": "/repo", "message": {"role": "user", "content": "shared surface"},
+    }) + "\n")
+
+    store = Store(tmp_path / "cross-file.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")
+    restarted = Recall(store, emb, None)
+
+    expanded = restarted.expand_around(
+        "shared", "raw-target", before=0, after=0, source="claude")
+    assert expanded and "CROSS_FILE_RAW_NEEDLE" in expanded[0].content
+    store.close()
+
+
 def test_files_for_escapes_like_wildcards_in_session_id(tmp_path):
     """The <session_id>.jsonl fallback interpolates session_id into a LIKE
     pattern: an unescaped '_' (one-any-char wildcard) would resolve session
@@ -338,6 +421,13 @@ def test_recall_search_fts_only_hits_carry_none_score(tmp_path):
     assert hits, "FTS-only degrade must still return keyword hits"
     assert hits[0].score is None, f"keyword-only hit must carry None, got {hits[0].score!r}"
     store.close()
+
+
+def test_invalid_source_is_rejected(tmp_path):
+    import pytest
+    r = _built(tmp_path)
+    with pytest.raises(ValueError, match="source must be"):
+        r.recall_search("cache", source="other")
 
 
 def test_grep_covers_files_with_no_chunks(tmp_path):

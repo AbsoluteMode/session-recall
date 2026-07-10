@@ -3,7 +3,15 @@ from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "session-recall"
 DB_PATH = DATA_DIR / "index.db"
-CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
+CLAUDE_PROJECTS = Path(
+    os.environ.get("SESSION_RECALL_CLAUDE_PROJECTS")
+    or (Path.home() / ".claude" / "projects")
+).expanduser()
+CODEX_HOME = Path(
+    os.environ.get("CODEX_HOME") or (Path.home() / ".codex")
+).expanduser()
+CODEX_SESSIONS = CODEX_HOME / "sessions"
+CODEX_ARCHIVED_SESSIONS = CODEX_HOME / "archived_sessions"
 
 # Embedding provider — PLUGGABLE. Voyage is the default (and the author's preference),
 # but any provider works: set these env vars (e.g. provider=openai,

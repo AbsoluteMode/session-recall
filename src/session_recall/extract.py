@@ -1,13 +1,20 @@
 import hashlib
-import json
 import re
-from datetime import datetime
 from .models import Chunk
 from .scope import project_label
+from .transcripts import (
+    TranscriptEvent,
+    extract_codex_file,
+    extractor_version,
+    iter_transcript_events,
+)
 
 # Bump when extraction logic changes -> baked into the per-file index signature so
 # stale files are re-extracted on the next index run. v2 = harness-boilerplate filter.
 EXTRACTOR_VERSION = 2
+# Codex has an independent extraction contract.  Keeping a separate tag means
+# adding/changing Codex support never invalidates (and re-embeds) an unchanged
+# Claude corpus.
 
 # Claude Code injects machine text into user turns (notifications, reminders, slash-command
 # echoes, local-command output). It is NOT the user speaking, so it must not be embedded as
@@ -39,61 +46,66 @@ def _clean_user_text(content: str) -> str | None:
     cleaned = cleaned.strip()
     return cleaned or None
 
-def _ts(obj) -> int:
-    s = obj.get("timestamp")
-    if not s:
-        return 0
-    try:
-        return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
-    except ValueError:
-        return 0
+def extractor_tag(source: str) -> str:
+    version = extractor_version(source)
+    return f"v{version}" if source == "claude" else f"codex-v{version}"
 
-def _mk(obj, project, role, text, offset, length, turn_index) -> Chunk:
-    cwd = obj.get("cwd", "")
+
+def _mk(event: TranscriptEvent, project: str, role: str, text: str) -> Chunk:
     return Chunk(
-        session_id=obj.get("sessionId", ""),
-        uuid=obj.get("uuid", ""),
+        session_id=event.session_id,
+        uuid=event.uuid,
         role=role,
         text=text,
-        project=project_label(cwd) or project,
-        cwd=cwd,
-        git_branch=obj.get("gitBranch", ""),
-        ts=_ts(obj),
-        file_path="",  # filled by caller-aware path below
-        byte_offset=offset,
-        byte_len=length,
-        turn_index=turn_index,
+        project=project_label(event.cwd) or project,
+        cwd=event.cwd,
+        git_branch=event.git_branch,
+        ts=event.ts,
+        file_path="",  # filled by extract_file
+        byte_offset=event.byte_offset,
+        byte_len=event.byte_len,
+        turn_index=event.turn_index,
         content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        source=event.source,
     )
 
-def extract_file(path: str, project: str) -> list[Chunk]:
+
+def _extract_claude(path: str, project: str) -> list[Chunk]:
     chunks: list[Chunk] = []
-    offset = 0
-    with open(path, "rb") as f:
-        for turn_index, raw in enumerate(f):
-            length = len(raw)
-            line_offset = offset
-            offset += length
-            try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            t = obj.get("type")
-            msg = obj.get("message") or {}
-            if t == "user" and isinstance(msg.get("content"), str):
-                text = _clean_user_text(msg["content"])
-                if text is None:
-                    continue  # pure harness boilerplate — not the user speaking
-                c = _mk(obj, project, "user", text, line_offset, length, turn_index)
-                c.file_path = path
-                chunks.append(c)
-            elif t == "assistant" and isinstance(msg.get("content"), list):
-                for block in msg["content"]:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text", "")
-                        if not text.strip():
-                            continue
-                        c = _mk(obj, project, "assistant", text, line_offset, length, turn_index)
-                        c.file_path = path
-                        chunks.append(c)
+    for event in iter_transcript_events(path, source="claude"):
+        obj = event.obj
+        msg = obj.get("message") or {}
+        if obj.get("type") == "user" and isinstance(msg.get("content"), str):
+            text = _clean_user_text(msg["content"])
+            if text is None:
+                continue  # pure harness boilerplate — not the user speaking
+            chunk = _mk(event, project, "user", text)
+            chunk.file_path = path
+            chunks.append(chunk)
+        elif obj.get("type") == "assistant" and isinstance(msg.get("content"), list):
+            for block in msg["content"]:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if not text.strip():
+                        continue
+                    chunk = _mk(event, project, "assistant", text)
+                    chunk.file_path = path
+                    chunks.append(chunk)
     return chunks
+
+
+def _extract_codex(path: str, project: str) -> list[Chunk]:
+    """Extract one copy of the visible Codex conversation surface.
+
+    event_msg is the canonical clean surface. response_item messages, reasoning,
+    and tools remain reachable through grep/expand but are never embedded.
+    """
+    return extract_codex_file(path, project=project)
+
+
+def extract_file(path: str, project: str, source: str = "claude") -> list[Chunk]:
+    if source == "claude":
+        return _extract_claude(path, project)
+    if source == "codex":
+        return _extract_codex(path, project)
+    raise ValueError(f"unknown transcript source: {source!r}")
