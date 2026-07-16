@@ -6,6 +6,7 @@ from session_recall.embed import FakeEmbedder
 from session_recall.rerank import FakeReranker
 from session_recall.index import index_corpus
 from session_recall.retrieve import Recall
+from session_recall.timefmt import date_range_to_epoch
 
 def _built(tmp_path):
     proj = tmp_path / "projects" / "-Users-me-proj"
@@ -253,6 +254,46 @@ def test_recent_sessions_orders_scopes_and_labels(tmp_path):
     sA = next(s for s in scoped if s["session_id"] == "sA")
     assert sA["label"].startswith("question alpha")  # first USER prompt, not the answer
     assert sA["turns"] == 2
+    store.close()
+
+
+def test_date_range_filters_search_grep_and_recent_sessions(tmp_path):
+    """One local calendar day is the same boundary across indexed and raw paths."""
+    import json
+
+    proj = tmp_path / "projects" / "-Users-me-dated"
+    proj.mkdir(parents=True)
+    transcript = proj / "dated.jsonl"
+    rows = [
+        {
+            "type": "user", "uuid": "d14", "sessionId": "s14",
+            "timestamp": "2026-07-14T18:59:59Z", "cwd": "/work/daily",
+            "message": {"role": "user", "content": "daily needle july fourteen"},
+        },
+        {
+            "type": "user", "uuid": "d15", "sessionId": "s15",
+            "timestamp": "2026-07-14T19:00:00Z", "cwd": "/work/daily",
+            "message": {"role": "user", "content": "daily needle july fifteen"},
+        },
+    ]
+    transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    store = Store(tmp_path / "dated.db")
+    emb = FakeEmbedder()
+    index_corpus(store, emb, tmp_path / "projects")
+    recall = Recall(store, emb, None)
+    start, end = date_range_to_epoch(
+        "2026-07-14", "2026-07-14", "Asia/Yekaterinburg")
+
+    semantic = recall.recall_search(
+        "daily needle", start_ts=start, end_ts=end, k=10)
+    assert semantic and {hit.session_id for hit in semantic} == {"s14"}
+
+    raw = recall.grep("daily needle", start_ts=start, end_ts=end)
+    assert raw and {hit.session_id for hit in raw} == {"s14"}
+
+    recent = recall.recent_sessions(start_ts=start, end_ts=end, limit=10)
+    assert [session["session_id"] for session in recent] == ["s14"]
+    assert recent[0]["turns"] == 1
     store.close()
 
 

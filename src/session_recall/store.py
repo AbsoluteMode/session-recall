@@ -57,6 +57,10 @@ class Store:
             "ON chunks(source, session_id)")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_ts ON chunks(ts)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_source_ts ON chunks(source, ts)")
         self.db.commit()
 
     def add(self, chunk: Chunk, embedding: "list[float] | bytes") -> int:
@@ -134,9 +138,10 @@ class Store:
 
     @staticmethod
     def _filters(scope_root: str | None, source: str | None,
-                 *, alias: str = "c") -> tuple[str, list[str]]:
+                 start_ts: int | None = None, end_ts: int | None = None,
+                 *, alias: str = "c") -> tuple[str, list[object]]:
         clauses: list[str] = []
-        params: list[str] = []
+        params: list[object] = []
         scope, scope_params = scope_clause(f"{alias}.cwd", scope_root)
         if scope:
             clauses.append(scope)
@@ -144,11 +149,22 @@ class Store:
         if source:
             clauses.append(f"{alias}.source = ?")
             params.append(source)
+        if start_ts is not None:
+            clauses.append(f"{alias}.ts >= ?")
+            params.append(start_ts)
+        elif end_ts is not None:
+            # Unknown timestamps are not evidence that a turn happened before
+            # an upper bound, so exclude ts=0 from date-filtered queries.
+            clauses.append(f"{alias}.ts > 0")
+        if end_ts is not None:
+            clauses.append(f"{alias}.ts < ?")
+            params.append(end_ts)
         return " AND ".join(clauses), params
 
     def knn(self, query_vec: list[float], n: int, scope_root: str | None = None,
-            source: str | None = None) -> list[tuple[int, float]]:
-        clause, params = self._filters(scope_root, source)
+            source: str | None = None, start_ts: int | None = None,
+            end_ts: int | None = None) -> list[tuple[int, float]]:
+        clause, params = self._filters(scope_root, source, start_ts, end_ts)
         if not clause:
             rows = self.db.execute(
                 "SELECT chunk_id, distance FROM vec_chunks "
@@ -168,12 +184,13 @@ class Store:
         return [(r[0], r[1]) for r in rows]
 
     def fts(self, query: str, n: int, scope_root: str | None = None,
-            source: str | None = None) -> list[int]:
+            source: str | None = None, start_ts: int | None = None,
+            end_ts: int | None = None) -> list[int]:
         terms = [t for t in query.split() if t]
         if not terms:
             return []
         match = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
-        clause, params = self._filters(scope_root, source)
+        clause, params = self._filters(scope_root, source, start_ts, end_ts)
         # ORDER BY rank (bm25, best first) — without it FTS5 returns rowid order
         # and LIMIT keeps an arbitrary oldest slice instead of the best matches.
         if not clause:
@@ -199,11 +216,13 @@ class Store:
         return Chunk(**data)
 
     def recent_sessions(self, scope_root: str | None, limit: int,
-                        source: str | None = None) -> list[tuple]:
+                        source: str | None = None, start_ts: int | None = None,
+                        end_ts: int | None = None) -> list[tuple]:
         """Sessions by most-recent activity (max ts), optionally scoped to a repo.
         Returns (source, session_id, project, last_ts, turns). Tiebreaks make
         equal-timestamp ordering deterministic."""
-        clause, params = self._filters(scope_root, source, alias="chunks")
+        clause, params = self._filters(
+            scope_root, source, start_ts, end_ts, alias="chunks")
         where = f" WHERE {clause}" if clause else ""
         return self.db.execute(
             f"SELECT source, session_id, project, max(ts) AS last_ts, count(*) AS turns "

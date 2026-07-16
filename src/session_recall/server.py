@@ -7,7 +7,7 @@ from .store import Store
 from .embed import make_embedder
 from .rerank import make_reranker
 from .retrieve import Recall
-from .timefmt import humanize_ts
+from .timefmt import date_range_to_epoch, humanize_ts
 
 mcp = FastMCP("session-recall")
 _recall: Recall | None = None
@@ -37,16 +37,25 @@ def _r() -> Recall:
 
 @mcp.tool()
 def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
-                  source: str | None = None) -> list[dict]:
+                  source: str | None = None, start_date: str | None = None,
+                  end_date: str | None = None, timezone: str | None = None,
+                  on_date: str | None = None) -> list[dict]:
     """Semantically search past Claude Code and Codex sessions. Returns ranked anchors.
 
     scope_cwd: pass your current working directory to restrict results to the
     current project/repo (worktrees collapse to the repo root). Omit it for a
     global, cross-project search.
     source: optionally restrict to "claude" or "codex"; omit for the shared index.
+    start_date/end_date: inclusive local calendar dates (YYYY-MM-DD). Either may
+    be omitted for an open-ended range.
+    on_date: shorthand for one local calendar day; cannot be combined with a range.
+    timezone: IANA timezone override; omit it to use the user's computer timezone.
     """
+    start_ts, end_ts = date_range_to_epoch(
+        start_date, end_date, timezone, on_date=on_date)
     return [_adict(a) for a in _r().recall_search(
-        query, k=k, scope_cwd=scope_cwd, source=source)]
+        query, k=k, scope_cwd=scope_cwd, source=source,
+        start_ts=start_ts, end_ts=end_ts)]
 
 
 @mcp.tool()
@@ -67,21 +76,32 @@ def step(session_id: str, uuid: str, direction: str, count: int = 1,
 
 @mcp.tool()
 def grep(pattern: str, session_id: str | None = None, scope_cwd: str | None = None,
-         source: str | None = None, limit: int = 100) -> list[dict]:
+         source: str | None = None, limit: int = 100,
+         start_date: str | None = None, end_date: str | None = None,
+         timezone: str | None = None, on_date: str | None = None) -> list[dict]:
     """On-demand substring scan over raw session transcripts.
 
     scope_cwd: pass your current working directory to restrict the scan to the
     current project/repo; omit for a global scan.
     source: optionally restrict to "claude" or "codex".
     limit: maximum number of matches returned (default 100).
+    start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
+    on_date: shorthand for one local calendar day; cannot be combined with a range.
+    timezone: IANA timezone override; omit it to use the user's computer timezone.
     """
+    start_ts, end_ts = date_range_to_epoch(
+        start_date, end_date, timezone, on_date=on_date)
     return [_adict(a) for a in _r().grep(
-        pattern, session_id, scope_cwd=scope_cwd, source=source, limit=limit)]
+        pattern, session_id, scope_cwd=scope_cwd, source=source, limit=limit,
+        start_ts=start_ts, end_ts=end_ts)]
 
 
 @mcp.tool()
 def recent_sessions(scope_cwd: str | None = None, limit: int = 10,
-                    source: str | None = None) -> list[dict]:
+                    source: str | None = None, start_date: str | None = None,
+                    end_date: str | None = None,
+                    timezone: str | None = None,
+                    on_date: str | None = None) -> list[dict]:
     """List the most recently active past sessions, freshest first — use to see the
     current state of work and how fresh the index is (the top entry's
     last_activity_human is the effective freshness). Also surfaces the sessions of a
@@ -90,10 +110,17 @@ def recent_sessions(scope_cwd: str | None = None, limit: int = 10,
     scope_cwd: pass your current working directory to restrict to the current
     project/repo (worktrees collapse to the repo root); omit for all projects.
     source: optionally restrict to "claude" or "codex".
+    start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
+    on_date: shorthand for one local calendar day; cannot be combined with a range.
+    timezone: IANA timezone override; omit it to use the user's computer timezone.
     Each entry: source, session_id, project, turns, last_activity (epoch),
     last_activity_human, label (the session's first user prompt).
     """
-    return _r().recent_sessions(scope_cwd=scope_cwd, limit=limit, source=source)
+    start_ts, end_ts = date_range_to_epoch(
+        start_date, end_date, timezone, on_date=on_date)
+    return _r().recent_sessions(
+        scope_cwd=scope_cwd, limit=limit, source=source,
+        start_ts=start_ts, end_ts=end_ts)
 
 
 def main():

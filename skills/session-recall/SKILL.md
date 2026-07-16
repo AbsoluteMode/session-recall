@@ -12,12 +12,16 @@ Treat each result's `source` (`claude` or `codex`) as provenance, not relevance.
 
 1. Start with `recall_search`; use `recent_sessions` first when the request is about the latest
    state or index freshness.
-2. Pass `scope_cwd` for repo-local questions. Omit it for cross-project recall; retry globally if
+2. When the request names one day, pass `on_date`; for a range, pass inclusive `start_date` /
+   `end_date`. The server defaults to the user's computer timezone, so pass `timezone` only when
+   the user requests an override. Preserve the filter across `recent_sessions`, `recall_search`,
+   and `grep`; do not rely on putting the date into the semantic query.
+3. Pass `scope_cwd` for repo-local questions. Omit it for cross-project recall; retry globally if
    a scoped search is thin.
-3. Pass `source="claude"` or `source="codex"` only when the user names a host or provenance
-   matters. Omit `source` to search the unified history; preserve it through expansion and
-   stepping when one is selected.
-4. For deeper grounding, inspect the best anchors with `expand_around`, walk with `step`, and use
+4. Treat Claude Code and Codex as one history by default. Omit `source` so both are searched;
+   results retain `source="claude"|"codex"` as provenance. Filter by source only when the user
+   explicitly names a host or provenance is material, and preserve that filter while drilling in.
+5. For deeper grounding, inspect the best anchors with `expand_around`, walk with `step`, and use
    `grep` for exact identifiers that semantic search misses.
 
 ## Deep-recall execution

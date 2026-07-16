@@ -252,6 +252,11 @@ def test_scope_source_and_recent_filters_span_mixed_corpus(tmp_path):
     index_corpus(store, FakeEmbedder(), claude, (active, tmp_path / "missing-archive"))
     recall = _recall(store)
 
+    # Unified is the default contract: no source filter searches both hosts,
+    # while every result keeps its provenance marker.
+    unified_recent = recall.recent_sessions(limit=10, now=2_000_000_000)
+    assert {item["source"] for item in unified_recent} == {"claude", "codex"}
+
     scoped = recall.recall_search(
         "shared scopable memory",
         k=10,

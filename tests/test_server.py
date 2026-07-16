@@ -17,6 +17,13 @@ def test_tool_functions_delegate(tmp_path, monkeypatch):
     out = server.recall_search("cache embeddings", k=1)
     assert out and "cache" in out[0]["snippet"]
 
+    same_day = server.recall_search(
+        "cache embeddings", k=1, on_date="2026-06-01", timezone="UTC")
+    assert same_day and same_day[0]["session_id"] == "sa"
+    assert server.recall_search(
+        "cache embeddings", k=1, start_date="2026-06-02",
+        end_date="2026-06-02", timezone="UTC") == []
+
 
 def _mk(uuid, text, cwd, slot, file_path="/f.jsonl", session_id="s"):
     import hashlib

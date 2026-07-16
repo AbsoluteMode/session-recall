@@ -1,6 +1,6 @@
 {
   "name": "session-recall",
-  "version": "0.3.0+codex.20260710121949",
+  "version": "0.3.0+codex.20260716100453",
   "description": "Shared semantic recall over local Claude Code and Codex session history.",
   "author": {
     "name": "max"

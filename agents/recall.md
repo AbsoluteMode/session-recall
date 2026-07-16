@@ -18,6 +18,10 @@ reconstruct from git logs or memory files when the recall tools can answer.
    the freshest sessions first (turn counts + first-prompt labels) to orient before drilling in.
    Pass `source="claude"` or `source="codex"` only when the request names a host; otherwise search
    both sources, including active and archived Codex sessions.
+   If the dispatch names one day, pass `on_date`; for a period, pass inclusive `start_date` /
+   `end_date`. The server uses the computer's local timezone by default; override it only when
+   requested. Preserve the filter across `recent_sessions`, `recall_search`, and `grep`; never
+   approximate it with date words.
 1. `recall_search(<topic>)` — semantic search. Try 2-3 phrasings if the first is thin; the
    user re-describes tasks loosely. If your dispatch names a current working directory / project,
    pass it as `scope_cwd` (works on `grep` too) to scope results to that repo — worktrees collapse

@@ -52,7 +52,9 @@ class Recall:
 
     def recall_search(self, query: str, k: int = 10, candidates: int = 100,
                       scope_cwd: str | None = None,
-                      source: str | None = None) -> list[Anchor]:
+                      source: str | None = None,
+                      start_ts: int | None = None,
+                      end_ts: int | None = None) -> list[Anchor]:
         self._validate_source(source)
         # scope_cwd is the agent's raw cwd; normalize to a repo root so the main
         # checkout and every worktree under it collapse to one scope. None = global.
@@ -62,13 +64,15 @@ class Recall:
         try:
             qv = self.embedder.embed_query(query)
             for cid, d in self.store.knn(
-                    qv, candidates, scope_root=root, source=source):
+                    qv, candidates, scope_root=root, source=source,
+                    start_ts=start_ts, end_ts=end_ts):
                 order.append(cid)
                 dist[cid] = d
         except Exception:
             pass  # embedding unavailable -> FTS-only
         for cid in self.store.fts(
-                query, candidates, scope_root=root, source=source):
+                query, candidates, scope_root=root, source=source,
+                start_ts=start_ts, end_ts=end_ts):
             if cid not in dist:
                 order.append(cid)
                 dist[cid] = None  # keyword match, no vector distance
@@ -253,7 +257,9 @@ class Recall:
 
     def grep(self, pattern: str, session_id: str | None = None,
              scope_cwd: str | None = None,
-             source: str | None = None, limit: int = 100) -> list[Anchor]:
+             source: str | None = None, limit: int = 100,
+             start_ts: int | None = None,
+             end_ts: int | None = None) -> list[Anchor]:
         self._validate_source(source)
         if limit < 1:
             return []
@@ -290,6 +296,13 @@ class Recall:
                 # Strictly streaming: the largest local Codex rollout can be
                 # hundreds of MB, and grep touches every indexed transcript.
                 for event in iter_transcript_events(path, source=path_source):
+                    if start_ts is not None or end_ts is not None:
+                        if not event.ts:
+                            continue
+                        if start_ts is not None and event.ts < start_ts:
+                            continue
+                        if end_ts is not None and event.ts >= end_ts:
+                            continue
                     t_sid = event.session_id or (rows[0][0] if rows else "")
                     if session_id and t_sid != session_id:
                         continue
@@ -323,7 +336,9 @@ class Recall:
 
     def recent_sessions(self, scope_cwd: str | None = None, limit: int = 10,
                         now: int | None = None,
-                        source: str | None = None) -> list[dict]:
+                        source: str | None = None,
+                        start_ts: int | None = None,
+                        end_ts: int | None = None) -> list[dict]:
         self._validate_source(source)
         # Freshest sessions first — answers "what's the current state / how fresh is
         # the index" (the top entry's last_activity IS the effective freshness) and
@@ -334,7 +349,7 @@ class Recall:
         now = int(time.time()) if now is None else now
         out: list[dict] = []
         for row_source, sid, project, last_ts, turns in self.store.recent_sessions(
-                root, limit, source=source):
+                root, limit, source=source, start_ts=start_ts, end_ts=end_ts):
             out.append({
                 "session_id": sid,
                 "source": row_source,

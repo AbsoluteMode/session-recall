@@ -18,7 +18,11 @@ current working directory to scope results to the current repo (worktrees collap
 root); omit it for cross-project recall. Ranked hits carry a human-readable `when_human`
 timestamp alongside the raw epoch. Every MCP tool accepts an optional `source` (`claude` or
 `codex`); omit it to use the unified history. Results include provenance as `source=claude` or
-`source=codex`.
+`source=codex`. The three discovery tools also accept `on_date` for one day or inclusive
+`start_date` / `end_date` (`YYYY-MM-DD`) plus an optional IANA `timezone`, so an agent can
+constrain retrieval to an actual local calendar day instead of hoping a date written into the
+semantic query affects ranking. If `timezone` is omitted, Session Recall uses the timezone of
+the computer running the MCP server.
 
 **Status:** v1, built and validated on real history. Key design rationale lives in
 [docs/decisions/](docs/decisions/).
@@ -62,6 +66,9 @@ session-recall index --source codex              # active + archived Codex sessi
 session-recall search "query"                    # unified semantic search
 session-recall search "query" --source codex
 session-recall recent --source claude            # freshest Claude sessions
+session-recall recent --date 2026-07-14           # uses this computer's timezone
+session-recall search "deployment work" --start-date 2026-07-14 \
+  --end-date 2026-07-14 --timezone Asia/Yekaterinburg
 session-recall grep "exact" --source codex --limit 100  # raw scan, no API needed
 session-recall prune                             # drop rows for deleted transcripts
 ```
@@ -75,7 +82,10 @@ python -m venv .venv && .venv/bin/pip install -e .
 
 `index --source` accepts `all`, `claude`, or `codex` and defaults to `all`. `search`,
 `recent`, `grep`, and `prune` accept optional `--source claude|codex`; omit it for both.
-Raw `grep` returns at most 100 matches by default; use `--limit` to adjust the cap.
+`search`, `recent`, and `grep` accept `--date` for one day or `--start-date`, `--end-date`, and
+`--timezone` for a range; range dates are inclusive and either boundary may be omitted. The
+timezone defaults to the computer's local zone and can be overridden with an IANA name. Raw
+`grep` returns at most 100 matches by default; use `--limit` to adjust the cap.
 
 ### Connect to Claude Code or Codex (MCP)
 

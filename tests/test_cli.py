@@ -40,6 +40,17 @@ def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "sa" in out and "cache embeddings" in out  # session id + first-prompt label
 
+    cli.main([
+        "recent", "--start-date", "2026-06-02", "--end-date", "2026-06-02",
+        "--timezone", "UTC",
+    ])
+    assert "sa" not in capsys.readouterr().out
+
+    cli.main([
+        "recent", "--date", "2026-06-01", "--timezone", "UTC",
+    ])
+    assert "sa" in capsys.readouterr().out
+
     cli.main(["grep", "tool output not human", "--limit", "1"])
     out = capsys.readouterr().out
     assert "u2" in out  # the tool_result turn's uuid

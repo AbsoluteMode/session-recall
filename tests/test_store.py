@@ -25,6 +25,34 @@ def test_fts_and_get_chunk(tmp_path):
     assert s.get_chunk(cid).uuid == "u1"
     s.close()
 
+
+def test_date_range_prefilters_knn_fts_and_recent_sessions(tmp_path):
+    """Date constraints must reach sqlite-vec, FTS, and aggregation before LIMIT."""
+    s = Store(tmp_path / "dated.db")
+    old = _chunk("old", "daily memory")
+    old.ts = 100
+    old.session_id = "s-old"
+    fresh = _chunk("fresh", "daily memory")
+    fresh.ts = 200
+    fresh.session_id = "s-fresh"
+    unknown = _chunk("unknown", "daily memory")
+    unknown.ts = 0
+    unknown.session_id = "s-unknown"
+    vector = [1.0] + [0.0] * 1023
+    s.add(old, vector)
+    fresh_id = s.add(fresh, vector)
+    s.add(unknown, vector)
+
+    assert [cid for cid, _ in s.knn(
+        vector, n=10, start_ts=150, end_ts=250)] == [fresh_id]
+    assert s.fts("daily", n=10, start_ts=150, end_ts=250) == [fresh_id]
+    recent = s.recent_sessions(None, 10, start_ts=150, end_ts=250)
+    assert [(row[1], row[4]) for row in recent] == [("s-fresh", 1)]
+
+    # An upper-only range must not classify unknown ts=0 as old evidence.
+    assert {row[1] for row in s.recent_sessions(None, 10, end_ts=150)} == {"s-old"}
+    s.close()
+
 def test_indexed_marker(tmp_path):
     s = Store(tmp_path / "t.db")
     assert not s.is_indexed("/f.jsonl", "sig1")
