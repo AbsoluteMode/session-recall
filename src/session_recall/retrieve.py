@@ -28,6 +28,16 @@ def _match_snippet(text: str, pattern: str, n: int = 240) -> str:
     end = min(len(text), start + n)
     return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
 
+class SearchResult(list):
+    """Anchors plus how they were found. Subclasses list so every existing caller
+    keeps indexing and iterating unchanged; `degraded` carries the health note that
+    the tool boundary turns into a warning for the agent."""
+
+    def __init__(self, anchors=(), degraded: str | None = None):
+        super().__init__(anchors)
+        self.degraded = degraded
+
+
 class Recall:
     def __init__(self, store: Store, embedder: Embedder, reranker: "Reranker | None" = None):
         self.store = store
@@ -61,6 +71,7 @@ class Recall:
         root = repo_root(scope_cwd) if scope_cwd else None
         order: list[int] = []
         dist: dict[int, float | None] = {}
+        degraded: str | None = None
         try:
             qv = self.embedder.embed_query(query)
             for cid, d in self.store.knn(
@@ -68,8 +79,14 @@ class Recall:
                     start_ts=start_ts, end_ts=end_ts):
                 order.append(cid)
                 dist[cid] = d
-        except Exception:
-            pass  # embedding unavailable -> FTS-only
+        except Exception as exc:
+            # WHY: docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md
+            # Embedding unavailable -> FTS-only. Never hard-fail: keyword hits still
+            # beat nothing. But say so — a silent fallback looks identical to a
+            # healthy search that found little, and the caller stops trusting recall
+            # instead of fixing the embedder.
+            degraded = (f"fts-only: embeddings unavailable, semantic ranking is off — "
+                        f"only literal word matches are returned ({type(exc).__name__}: {exc})")
         for cid in self.store.fts(
                 query, candidates, scope_root=root, source=source,
                 start_ts=start_ts, end_ts=end_ts):
@@ -77,7 +94,7 @@ class Recall:
                 order.append(cid)
                 dist[cid] = None  # keyword match, no vector distance
         if not order:
-            return []
+            return SearchResult([], degraded)
         # Collapse exact duplicates (same content across resumed sessions / sidechains) so
         # identical text never wastes two top-k slots. All rows stay in the DB (provenance);
         # we keep the highest-priority occurrence (KNN order, then FTS).
@@ -104,7 +121,9 @@ class Recall:
                 ranked = None
 
         if ranked is not None:
-            return [self._anchor(chunk_by_id[distinct[idx]], score) for idx, score in ranked]
+            return SearchResult(
+                [self._anchor(chunk_by_id[distinct[idx]], score) for idx, score in ranked],
+                degraded)
         # no reranker: KNN-similarity order; score monotonic in similarity, metric-
         # agnostic. Keyword-only hits carry None (no distance), not a fake 0.0 that
         # reads as "irrelevant" at the tool boundary.
@@ -113,7 +132,7 @@ class Recall:
             d = dist.get(cid)
             score = round(1.0 / (1.0 + d), 4) if isinstance(d, (int, float)) else None
             out.append(self._anchor(chunk_by_id[cid], score))
-        return out
+        return SearchResult(out, degraded)
 
     def _files_for(self, uuid: str, session_id: str | None,
                    source: str | None = None) -> list[str]:

@@ -23,6 +23,10 @@ Treat each result's `source` (`claude` or `codex`) as provenance, not relevance.
    explicitly names a host or provenance is material, and preserve that filter while drilling in.
 5. For deeper grounding, inspect the best anchors with `expand_around`, walk with `step`, and use
    `grep` for exact identifiers that semantic search misses.
+6. `recall_search` answers with `{"anchors": [...], "degraded": null | str}`. When `degraded` is
+   set, the embedding provider was unreachable and only literal word matching ran: say so to the
+   user, retry with the exact identifiers you expect, and treat a thin result as inconclusive
+   rather than as "nothing in the history".
 
 ## Deep-recall execution
 

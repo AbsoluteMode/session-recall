@@ -39,8 +39,16 @@ def _r() -> Recall:
 def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
                   source: str | None = None, start_date: str | None = None,
                   end_date: str | None = None, timezone: str | None = None,
-                  on_date: str | None = None) -> list[dict]:
-    """Semantically search past Claude Code and Codex sessions. Returns ranked anchors.
+                  on_date: str | None = None) -> dict:
+    """Semantically search past Claude Code and Codex sessions.
+
+    Returns {"anchors": [...ranked anchors...], "degraded": null | str}.
+
+    degraded is non-null when the embedding provider was unreachable and the search
+    fell back to literal keyword matching: semantic ranking is OFF, so a thin result
+    set means "not phrased this way in the transcript", NOT "not in the history".
+    Retry with the exact identifiers you expect (error strings, symbols, file names),
+    tell the user the search is degraded, and treat a miss as inconclusive.
 
     scope_cwd: pass your current working directory to restrict results to the
     current project/repo (worktrees collapse to the repo root). Omit it for a
@@ -53,9 +61,11 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     """
     start_ts, end_ts = date_range_to_epoch(
         start_date, end_date, timezone, on_date=on_date)
-    return [_adict(a) for a in _r().recall_search(
+    hits = _r().recall_search(
         query, k=k, scope_cwd=scope_cwd, source=source,
-        start_ts=start_ts, end_ts=end_ts)]
+        start_ts=start_ts, end_ts=end_ts)
+    return {"anchors": [_adict(a) for a in hits],
+            "degraded": getattr(hits, "degraded", None)}
 
 
 @mcp.tool()
