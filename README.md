@@ -1,8 +1,11 @@
 # session-recall
 
-Local, agentic **semantic recall over your Claude Code and Codex session history**. Both
-hosts feed one index, so either agent can recover context created by the other. It gives the
-agent five tools (via MCP) so it can resume past work instead of making you re-explain it:
+Local, agentic **semantic recall over your Claude Code and Codex session history** — one index
+shared by two different engines. Claude can read what Codex worked out yesterday, Codex can read
+Claude's, and neither needs you to re-explain it. Not a summary file someone maintains by hand:
+the actual turns, including tool calls and reasoning, searchable by meaning.
+
+Five tools over MCP:
 
 - `recall_search(query)` — find a past discussion **by meaning** (not substring). Answers
   `{"anchors": [...], "degraded": null | str}`; `degraded` is set when the embedding provider was
@@ -54,65 +57,98 @@ system degrades gracefully to KNN + FTS without one. Switching the embedding
 provider/model is detected (an embed fingerprint is part of each file's index
 signature) and triggers a clean re-embed instead of silently mixing vector spaces.
 
-## Install / run
+## Install
 
-For normal use with the bundled Claude Code/Codex plugins, install the two CLI entrypoints on
-your user `PATH` (the manifests also check `~/.local/bin`):
+Two pieces: a Python CLI (which also ships the MCP server) and a plugin that wires it into your
+agent. Budget about two minutes plus the first index run.
+
+### 1. CLI
 
 ```bash
-pipx install --editable .
-export VOYAGE_API_KEY=...                        # your Voyage key
+pipx install git+https://github.com/AbsoluteMode/session-recall
+export VOYAGE_API_KEY=...   # get one at voyageai.com; add the line to your shell profile
+session-recall index        # first run walks your whole history; later runs are incremental
+```
 
-session-recall index                             # both sources (same as --source all)
-session-recall index --source claude             # only ~/.claude/projects
-session-recall index --source codex              # active + archived Codex sessions
-session-recall search "query"                    # unified semantic search
+`pipx` puts `session-recall` and `session-recall-mcp` on `~/.local/bin` — exactly where the
+plugin manifests look for them. The first index depends on how much history you have: minutes
+for months of transcripts, seconds after that.
+
+### 2. Plugin
+
+**Claude Code**
+
+```
+/plugin marketplace add AbsoluteMode/session-recall
+/plugin install session-recall
+```
+
+Then start a new session — MCP servers and skills load at session start, not on install.
+
+**Codex** — the `.codex-plugin/plugin.json` manifest is ready to drop into a local repo or your
+personal marketplace; see the
+[local plugin installation guide](https://learn.chatgpt.com/docs/build-plugins#install-a-local-plugin-manually).
+Codex also asks you to review newly installed hooks once via `/hooks`.
+
+### 3. Check it works
+
+```bash
+session-recall search "something you actually discussed last week"
+```
+
+Hits with a `score` mean semantic search is live. In the agent, `claude mcp list` should show
+`session-recall ✔ Connected`, and asking it about past work should trigger `recall_search`.
+
+Nothing else to configure: the bundled `SessionStart` hook re-indexes in the background from
+then on, so the index keeps up with both hosts on its own.
+
+### Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `recall_search` answers with `degraded` set | The embedding provider is unreachable — only literal word matching ran. Results are still real, but a miss proves nothing. |
+| Indexer logs `HTTP code 403` with an HTML body | Not your key: a WAF is blocking your IP (common on VPN and datacenter exits). Same 403 appears with no key at all. Route egress elsewhere or switch provider. |
+| `Missing dependencies for SOCKS support` | A SOCKS proxy is set in the environment but `PySocks` is not installed in that venv. |
+| `recent_sessions` shows an old timestamp | The indexer has not succeeded recently. Run `session-recall index` by hand and read the output. |
+
+### CLI reference
+
+```bash
+session-recall index --source claude|codex|all   # defaults to all
 session-recall search "query" --source codex
-session-recall recent --source claude            # freshest Claude sessions
-session-recall recent --date 2026-07-14           # uses this computer's timezone
+session-recall recent --date 2026-07-14          # this computer's timezone
 session-recall search "deployment work" --start-date 2026-07-14 \
   --end-date 2026-07-14 --timezone Asia/Yekaterinburg
-session-recall grep "exact" --source codex --limit 100  # raw scan, no API needed
+session-recall grep "exact" --limit 100          # raw scan, no API key needed
 session-recall prune                             # drop rows for deleted transcripts
 ```
 
-For repository development or manual MCP registration, an in-tree virtualenv works too:
+`search`, `recent`, `grep`, and `prune` all take an optional `--source claude|codex`; omit it to
+search both. Date filters are inclusive and either boundary may be omitted; the timezone
+defaults to this computer's and accepts any IANA name. `grep` caps at 100 matches by default.
+
+For development, an in-tree virtualenv works too:
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
 .venv/bin/session-recall index
 ```
 
-`index --source` accepts `all`, `claude`, or `codex` and defaults to `all`. `search`,
-`recent`, `grep`, and `prune` accept optional `--source claude|codex`; omit it for both.
-`search`, `recent`, and `grep` accept `--date` for one day or `--start-date`, `--end-date`, and
-`--timezone` for a range; range dates are inclusive and either boundary may be omitted. The
-timezone defaults to the computer's local zone and can be overridden with an IANA name. Raw
-`grep` returns at most 100 matches by default; use `--limit` to adjust the cap.
-
-### Connect to Claude Code or Codex (MCP)
-
-The repo includes both Claude Code and Codex plugin manifests around the same MCP server and
-recall skill. To register the server manually in Claude Code:
+To register the MCP server by hand instead of using the plugin:
 
 ```bash
-claude mcp add session-recall --scope user -- \
-  /absolute/path/.venv/bin/python -m session_recall.server
+claude mcp add session-recall --scope user -- /absolute/path/.venv/bin/session-recall-mcp
 ```
-
-The server reads `VOYAGE_API_KEY` from the environment. For Codex, the
-`.codex-plugin/plugin.json` manifest is ready to place in a local repo or personal marketplace;
-follow the [local plugin installation guide](https://learn.chatgpt.com/docs/build-plugins#install-a-local-plugin-manually).
-In Claude Code, verify with `claude mcp list` → `✔ Connected`. Start a new session/task after
-enabling the plugin so the MCP tools and skill are loaded.
 
 ## Keeping the index fresh
 
-Indexing is incremental (it skips already-indexed files by signature), so staying fresh is
-cheap. The plugin's bundled `SessionStart` hook is compatible with both hosts and runs
-`session-recall index` in the background; the default `--source all` refreshes both histories.
-Codex requires a one-time review/trust of newly installed or changed hooks through `/hooks`.
-For a manual Claude Code hook in `~/.claude/settings.json`:
+If you installed the plugin, this is already handled — skip to the next section. The bundled
+`SessionStart` hook works on both hosts and runs `session-recall index` in the background, and
+the default `--source all` refreshes both histories. Indexing is incremental (it skips
+already-indexed files by signature), so staying fresh is cheap.
+
+Only if you registered the MCP server by hand, add the hook yourself in
+`~/.claude/settings.json`:
 
 ```json
 "hooks": {
