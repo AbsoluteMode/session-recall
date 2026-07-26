@@ -533,3 +533,38 @@ def test_recall_collapses_identical_content_across_sessions(tmp_path):
         "SELECT count(*) FROM chunks WHERE content_hash = ?",
         (hashlib.sha256(dup.encode()).hexdigest(),)).fetchone()[0] == 2
     store.close()
+
+
+def test_recall_search_survives_orphaned_index_row(tmp_path):
+    """An unscoped recall_search must degrade past a dangling index row, not die.
+    Live repro (prod index, 120 orphans): global search crashed with
+    TypeError: 'NoneType' object is not iterable while the same query scoped to a
+    repo returned 8 anchors — the scoped SQL JOINs chunks, the unscoped one does not."""
+    r = _built(tmp_path)
+    top = r.recall_search("cache embeddings", k=1)[0]
+    ghost = r.store.db.execute(
+        "SELECT id FROM chunks WHERE uuid = ?", (top.uuid,)).fetchone()[0]
+    r.store.db.execute("DELETE FROM chunks WHERE id = ?", (ghost,))
+    r.store.db.commit()
+
+    hits = r.recall_search("cache embeddings", k=5)  # must not raise
+    assert top.uuid not in {a.uuid for a in hits}
+
+
+def test_recall_search_skips_chunk_deleted_after_candidate_selection(tmp_path):
+    """The SQL orphan guard cannot cover the race: a background reindex may delete
+    a chunk between candidate selection and the read. One vanished candidate must
+    cost its own slot, not the whole search."""
+    r = _built(tmp_path)
+    real_knn = r.store.knn
+
+    def knn_then_delete(*args, **kwargs):
+        rows = real_knn(*args, **kwargs)
+        if rows:  # the reindex lands right here, after candidates are chosen
+            r.store.db.execute("DELETE FROM chunks WHERE id = ?", (rows[0][0],))
+            r.store.db.commit()
+        return rows
+
+    r.store.knn = knn_then_delete
+    hits = r.recall_search("cache embeddings", k=5)  # must not raise
+    assert all(a.uuid for a in hits)

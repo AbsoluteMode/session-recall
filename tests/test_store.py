@@ -217,6 +217,24 @@ def test_fts_scope_excludes_sibling_prefix(tmp_path):
     s.close()
 
 
+def test_knn_and_fts_skip_orphaned_index_rows(tmp_path):
+    """A vec/fts row whose chunk row is gone must never surface as a candidate.
+    Live repro: 120 orphans in the production index crashed every unscoped
+    recall_search with TypeError: 'NoneType' object is not iterable (get_chunk on
+    a missing id). Scoped queries JOIN chunks and were immune; unscoped ones read
+    the index tables straight and handed the dangling id to get_chunk."""
+    s = Store(tmp_path / "orphan.db")
+    ghost = s.add(_chunk("u1", "alpha ghost"), [1.0] + [0.0] * 1023)
+    alive = s.add(_chunk("u2", "alpha alive"), [0.9] + [0.0] * 1023)
+    # The desync itself: chunk row vanished, its index rows lingered.
+    s.db.execute("DELETE FROM chunks WHERE id = ?", (ghost,))
+    s.db.commit()
+
+    assert [cid for cid, _ in s.knn([1.0] + [0.0] * 1023, 5)] == [alive]
+    assert s.fts("alpha", 5) == [alive]
+    s.close()
+
+
 def test_delete_file_removes_chunks_vec_and_fts(tmp_path):
     """delete_file must clear a file's rows from chunks + vec_chunks + fts_chunks,
     leaving other files untouched (used for delete-before-reinsert)."""
@@ -231,3 +249,73 @@ def test_delete_file_removes_chunks_vec_and_fts(tmp_path):
     assert [cid for cid, _ in s.knn([1.0] + [0.0] * 1023, 5)] == [keep]  # only survivor in vec
     assert s.get_chunk(keep).uuid == "u3"
     s.close()
+
+
+def test_get_chunk_returns_none_for_missing_id(tmp_path):
+    """A vanished chunk is a normal outcome (background reindex deletes rows while
+    a search is in flight), so the read reports absence instead of exploding on a
+    None row inside zip()."""
+    s = Store(tmp_path / "t.db")
+    cid = s.add(_chunk("u1", "alpha"), [1.0] + [0.0] * 1023)
+    assert s.get_chunk(cid).uuid == "u1"
+    assert s.get_chunk(cid + 999) is None
+    s.close()
+
+
+def test_delete_file_leaves_no_orphans_when_rows_arrive_mid_delete(tmp_path):
+    """delete_file must not outlive its own snapshot.
+
+    It read ids from chunks, then deleted chunks by file_path — two different
+    criteria. A second indexer (parallel Claude Code sessions each fire the
+    freshness hook) committing rows for the same file in between got its chunks
+    row deleted by the file_path sweep while its vec/fts rows survived: orphans.
+    Live index: 3 contiguous runs of 2, 13 and 105 such rows."""
+    path = tmp_path / "race.db"
+    victim = Store(path)
+    intruder = Store(path)
+    victim.add(_chunk_in("u1", "alpha one", "/f.jsonl"), [1.0] + [0.0] * 1023)
+    victim.commit()
+
+    class _Snapshot:  # a cursor read before the intruder committed
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return self._rows
+
+    class _RacingDb:
+        """Real connection; the intruder's commit lands right after the first
+        read of chunks — the exact window two indexers hit in production."""
+
+        def __init__(self, real):
+            self._real = real
+            self._fired = False
+
+        def execute(self, sql, *args):
+            if not self._fired and sql.lstrip().upper().startswith("SELECT ID FROM CHUNKS"):
+                self._fired = True
+                rows = self._real.execute(sql, *args).fetchall()
+                intruder.add(_chunk_in("u2", "alpha two", "/f.jsonl"),
+                             [0.0, 1.0] + [0.0] * 1022)
+                intruder.commit()
+                return _Snapshot(rows)
+            return self._real.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    real_db = victim.db
+    victim.db = _RacingDb(real_db)
+    victim.delete_file("/f.jsonl")
+    victim.db = real_db
+    victim.commit()
+
+    orphans = victim.db.execute(
+        "SELECT count(*) FROM vec_chunks v LEFT JOIN chunks c ON c.id = v.chunk_id "
+        "WHERE c.id IS NULL").fetchone()[0]
+    assert orphans == 0, f"{orphans} vec rows outlived their chunk"
+    assert victim.db.execute(
+        "SELECT count(*) FROM fts_chunks f LEFT JOIN chunks c ON c.id = f.chunk_id "
+        "WHERE c.id IS NULL").fetchone()[0] == 0
+    intruder.close()
+    victim.close()

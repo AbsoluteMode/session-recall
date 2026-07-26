@@ -103,6 +103,8 @@ class Recall:
         chunk_by_id = {}
         for cid in order:
             c = self.store.get_chunk(cid)
+            if c is None:
+                continue  # deleted mid-search: costs its own slot, not the search
             if c.content_hash in seen:
                 continue
             seen.add(c.content_hash)

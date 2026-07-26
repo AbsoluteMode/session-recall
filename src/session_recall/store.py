@@ -107,14 +107,20 @@ class Store:
         """Remove all chunks (+ their vec/fts rows) for a file. Called before
         re-indexing a changed file so a growing transcript does not accumulate
         duplicate chunks every time it is re-scanned. No-op for a new file.
-        Not committed here — part of the caller's per-file transaction."""
-        ids = [r[0] for r in self.db.execute(
-            "SELECT id FROM chunks WHERE file_path = ?", (path,)).fetchall()]
-        if ids:
-            marks = ",".join("?" * len(ids))
-            self.db.execute(f"DELETE FROM vec_chunks WHERE chunk_id IN ({marks})", ids)
-            self.db.execute(f"DELETE FROM fts_chunks WHERE chunk_id IN ({marks})", ids)
-            self.db.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
+        Not committed here — part of the caller's per-file transaction.
+
+        All three deletes share ONE criterion (file_path) resolved inside the
+        write transaction. The previous version snapshotted ids first and then
+        swept chunks by file_path: a parallel indexer — every concurrent Claude
+        Code session fires the freshness hook — could commit rows for the same
+        file in that window, and the sweep deleted their chunks row while their
+        vec/fts rows, absent from the stale snapshot, survived as orphans.
+        WHY: docs/decisions/2026-07-27-orphaned-index-rows.md"""
+        for table in ("vec_chunks", "fts_chunks"):
+            self.db.execute(
+                f"DELETE FROM {table} WHERE chunk_id IN "
+                "(SELECT id FROM chunks WHERE file_path = ?)", (path,))
+        self.db.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
 
     def prune_deleted(self, source: str | None = None) -> int:
         """Drop index rows for transcripts that no longer exist on disk.
@@ -166,9 +172,15 @@ class Store:
             end_ts: int | None = None) -> list[tuple[int, float]]:
         clause, params = self._filters(scope_root, source, start_ts, end_ts)
         if not clause:
+            # The IN-subquery is not a filter, it is the orphan guard: a vec row
+            # whose chunk is gone is not a candidate. Scoped queries got this for
+            # free from their prefilter; unscoped ones read vec_chunks straight and
+            # handed dangling ids to get_chunk.
+            # WHY: docs/decisions/2026-07-27-orphaned-index-rows.md
             rows = self.db.execute(
                 "SELECT chunk_id, distance FROM vec_chunks "
-                "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                "WHERE embedding MATCH ? AND k = ? "
+                "AND chunk_id IN (SELECT id FROM chunks) ORDER BY distance",
                 (sqlite_vec.serialize_float32(query_vec), n)).fetchall()
             return [(r[0], r[1]) for r in rows]
         # sqlite-vec supports an IN-subquery prefilter on the vec0 primary key.
@@ -194,9 +206,12 @@ class Store:
         # ORDER BY rank (bm25, best first) — without it FTS5 returns rowid order
         # and LIMIT keeps an arbitrary oldest slice instead of the best matches.
         if not clause:
+            # JOIN, not a plain scan: same orphan guard as knn above — an fts row
+            # outliving its chunk must not become a candidate.
             rows = self.db.execute(
-                "SELECT chunk_id FROM fts_chunks WHERE fts_chunks MATCH ? "
-                "ORDER BY rank LIMIT ?",
+                "SELECT fts_chunks.chunk_id FROM fts_chunks "
+                "JOIN chunks c ON c.id = fts_chunks.chunk_id "
+                "WHERE fts_chunks MATCH ? ORDER BY fts_chunks.rank LIMIT ?",
                 (match, n)).fetchall()
             return [r[0] for r in rows]
         # Scoped: filter applies BEFORE limit via JOIN — exact, no over-fetch.
@@ -207,9 +222,14 @@ class Store:
             (match, *params, n)).fetchall()
         return [r[0] for r in rows]
 
-    def get_chunk(self, chunk_id: int) -> Chunk:
+    def get_chunk(self, chunk_id: int) -> "Chunk | None":
+        """None when the chunk is gone. Absence is a normal outcome, not a bug: a
+        background reindex deletes rows while a search is in flight, so the id a
+        caller holds can die between candidate selection and this read."""
         row = self.db.execute(
             f"SELECT {', '.join(_COLS)} FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
+        if row is None:
+            return None
         data = dict(zip(_COLS, row))
         for k in ("ts", "byte_offset", "byte_len", "turn_index"):
             data[k] = int(data[k])
