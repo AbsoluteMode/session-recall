@@ -28,12 +28,16 @@ reconstruct from git logs or memory files when the recall tools can answer.
    to the repo root. Omit it, or retry without it, for cross-project history or when scoped results
    come back thin. Preserve the requested `source` filter across search, expansion, stepping,
    recent, and grep calls.
-2. Hits are ranked snippets that may span several sessions AND several *different* sub-issues.
+2. `recall_search` returns `{"anchors": [...], "degraded": null | str}`. A non-null `degraded`
+   means the embedder was unreachable and the hits are literal keyword matches only — search by
+   exact identifiers instead of paraphrases, report the degradation in your brief, and never
+   conclude "no history" from a thin degraded result.
+3. Hits are ranked snippets that may span several sessions AND several *different* sub-issues.
    Work out which hits belong to the SAME task vs adjacent ones.
-3. For the best 1-3 hits, `expand_around(session_id, uuid)` to read the surrounding arc
+4. For the best 1-3 hits, `expand_around(session_id, uuid)` to read the surrounding arc
    (decision → why → outcome). `step` to walk further. `grep` for exact identifiers (error
    strings, flags, symbols) that semantic search missed.
-4. A task may span multiple sessions/dates — gather them; order by time if it matters.
+5. A task may span multiple sessions/dates — gather them; order by time if it matters.
 
 ## Return ONLY this (≤ ~250 words)
 - **Task:** what it was, one line.

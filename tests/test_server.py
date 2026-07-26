@@ -14,15 +14,15 @@ def test_tool_functions_delegate(tmp_path, monkeypatch):
     store = Store(tmp_path / "s.db")
     index_corpus(store, FakeEmbedder(), tmp_path / "projects")
     monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
-    out = server.recall_search("cache embeddings", k=1)
+    out = server.recall_search("cache embeddings", k=1)["anchors"]
     assert out and "cache" in out[0]["snippet"]
 
     same_day = server.recall_search(
-        "cache embeddings", k=1, on_date="2026-06-01", timezone="UTC")
+        "cache embeddings", k=1, on_date="2026-06-01", timezone="UTC")["anchors"]
     assert same_day and same_day[0]["session_id"] == "sa"
     assert server.recall_search(
         "cache embeddings", k=1, start_date="2026-06-02",
-        end_date="2026-06-02", timezone="UTC") == []
+        end_date="2026-06-02", timezone="UTC")["anchors"] == []
 
 
 def _mk(uuid, text, cwd, slot, file_path="/f.jsonl", session_id="s"):
@@ -48,7 +48,7 @@ def test_recall_search_forwards_scope_cwd(tmp_path, monkeypatch):
             return qvec
 
     monkeypatch.setattr(server, "_recall", Recall(store, _QEmb(), None))
-    out = server.recall_search("anything", k=10, scope_cwd="/Users/me/repoA")
+    out = server.recall_search("anything", k=10, scope_cwd="/Users/me/repoA")["anchors"]
     assert out and all(o["uuid"] == "u1" for o in out), "server did not forward scope_cwd to recall"
     store.close()
 
@@ -57,8 +57,37 @@ def test_recall_search_enriches_with_human_timestamp(tmp_path, monkeypatch):
     store = Store(tmp_path / "h.db")
     store.add(*_mk("u1", "alpha", "/Users/me/repoA", 0))
     monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
-    out = server.recall_search("alpha", k=1)
+    out = server.recall_search("alpha", k=1)["anchors"]
     assert out and "when_human" in out[0], "raw epoch not enriched with when_human"
+    store.close()
+
+
+def test_recall_search_reports_fts_only_degrade(tmp_path, monkeypatch):
+    """Embedder unreachable -> search runs on FTS alone. The response MUST say so:
+    without the flag a lexical result set is indistinguishable from a semantic one,
+    and the agent concludes the history is empty when it is merely unsearchable."""
+    store = Store(tmp_path / "deg.db")
+    store.add(*_mk("u1", "alpha needle", "/Users/me/repoA", 0))
+
+    class _DownEmb(FakeEmbedder):
+        def embed_query(self, text):
+            raise RuntimeError("embedding api down")
+
+    monkeypatch.setattr(server, "_recall", Recall(store, _DownEmb(), None))
+    out = server.recall_search("needle", k=1)
+    assert out["anchors"], "FTS-only degrade must still return keyword hits"
+    assert out["degraded"], "degrade to FTS-only is not reported in the response"
+    store.close()
+
+
+def test_recall_search_healthy_is_not_flagged(tmp_path, monkeypatch):
+    """A working embedder must leave the flag clear — otherwise the warning is noise
+    and gets ignored exactly when it matters."""
+    store = Store(tmp_path / "ok.db")
+    store.add(*_mk("u1", "alpha needle", "/Users/me/repoA", 0))
+    monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
+    out = server.recall_search("needle", k=1)
+    assert out["degraded"] is None, "healthy search must not be flagged as degraded"
     store.close()
 
 

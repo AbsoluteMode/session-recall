@@ -4,7 +4,10 @@ Local, agentic **semantic recall over your Claude Code and Codex session history
 hosts feed one index, so either agent can recover context created by the other. It gives the
 agent five tools (via MCP) so it can resume past work instead of making you re-explain it:
 
-- `recall_search(query)` — find a past discussion **by meaning** (not substring).
+- `recall_search(query)` — find a past discussion **by meaning** (not substring). Answers
+  `{"anchors": [...], "degraded": null | str}`; `degraded` is set when the embedding provider was
+  unreachable and only literal matching ran, so the agent can say so instead of mistaking a
+  lexical miss for an empty history.
 - `expand_around(session_id, uuid)` — a cursor into the raw turn (tool calls, outputs, thinking).
 - `step(session_id, uuid, direction)` — move to an adjacent turn (cheap cursor step).
 - `grep(pattern)` — on-demand substring scan over **all** indexed transcripts, including
