@@ -308,3 +308,28 @@ class Store:
     def close(self):
         self.db.commit()  # no-op when nothing is pending; saves ad-hoc writers
         self.db.close()
+
+
+def corpus_summary(store: Store, top_n: int = 3) -> dict:
+    """What the index actually holds, for the line printed after `index`.
+
+    A chunk count means nothing to someone who just installed this. Sessions, the
+    span they cover and the split across engines do — especially the split, since a
+    shared Claude + Codex history is the point of the tool and a chunk total hides it
+    completely.
+    """
+    chunks, sessions, first, last = store.db.execute(
+        "SELECT COUNT(*), COUNT(DISTINCT session_id), MIN(ts), MAX(ts) "
+        "FROM chunks WHERE ts > 0").fetchone()
+    by_source = dict(store.db.execute(
+        "SELECT source, COUNT(DISTINCT session_id) FROM chunks GROUP BY source"))
+    top_projects = store.db.execute(
+        "SELECT project, COUNT(*) c FROM chunks WHERE project IS NOT NULL "
+        "GROUP BY project ORDER BY c DESC LIMIT ?", (top_n,)).fetchall()
+    return {
+        "chunks": chunks or 0,
+        "sessions": sessions or 0,
+        "by_source": by_source,
+        "span_days": round((last - first) / 86400) if first and last else 0,
+        "top_projects": [(p, c) for p, c in top_projects],
+    }
