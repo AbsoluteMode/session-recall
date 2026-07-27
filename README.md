@@ -66,8 +66,15 @@ agent. Budget about two minutes plus the first index run.
 
 ```bash
 pipx install git+https://github.com/AbsoluteMode/session-recall
-export VOYAGE_API_KEY=...   # get one at voyageai.com; add the line to your shell profile
-session-recall index        # first run walks your whole history; later runs are incremental
+session-recall index   # first run walks your whole history; later runs are incremental
+```
+
+That is the whole thing if you have a local embedding server running — see
+[Embedding providers](#embedding-providers) for the free local setup. For hosted Voyage
+embeddings instead, export a key first:
+
+```bash
+export VOYAGE_API_KEY=...   # voyageai.com; put the line in your shell profile
 ```
 
 `pipx` puts `session-recall` and `session-recall-mcp` on `~/.local/bin` — exactly where the
@@ -139,6 +146,57 @@ To register the MCP server by hand instead of using the plugin:
 ```bash
 claude mcp add session-recall --scope user -- /absolute/path/.venv/bin/session-recall-mcp
 ```
+
+## Embedding providers
+
+Nothing is locked to one vendor. `SESSION_RECALL_EMBED=<preset>` sets endpoint, model,
+dimension and reranker together, because those four are not independent choices:
+
+| preset | runs | model | dim | reranker |
+|---|---|---|---|---|
+| `voyage` | hosted, needs a key | `voyage-4-large` | 1024 | `rerank-2.5` |
+| `ollama` | **local, free** | `nomic-embed-text` | 768 | — |
+| `lmstudio` | **local, free** | `nomic-embed-text-v1.5` | 768 | — |
+| `openai` | hosted, needs a key | `text-embedding-3-large` | 1024 | — |
+
+With no preset set, session-recall picks Voyage when `VOYAGE_API_KEY` is present, and
+otherwise probes for a local server already listening — better than defaulting to a
+provider that is guaranteed to reject the request. With a key configured, no probe runs.
+
+**Free and local, start to finish:**
+
+```bash
+ollama pull nomic-embed-text
+export SESSION_RECALL_EMBED=ollama
+session-recall index
+```
+
+**Your own endpoint** — any server speaking `/v1/embeddings` (llama.cpp, vLLM, a
+company gateway). Individual variables always beat the preset, so mix freely:
+
+```bash
+export SESSION_RECALL_EMBED_PROVIDER=openai-compatible
+export SESSION_RECALL_EMBED_BASE_URL=https://embeddings.internal/v1
+export SESSION_RECALL_EMBED_MODEL=your-model
+export SESSION_RECALL_EMBED_DIM=1024
+```
+
+Two things worth knowing before you switch:
+
+- **A different embedder needs its own index.** Vector tables are fixed-width, so
+  changing the model or dimension means rebuilding: delete
+  `~/.local/share/session-recall/index.db` and re-run `index`. Attempting to reuse the old
+  one now fails with a message saying exactly that, rather than looking like a dead
+  embedder.
+- **Local presets ship no reranker**, so ranking is KNN + FTS only — good enough, but
+  noticeably coarser than the hosted path.
+
+On model choice: `nomic-embed-text` is the default because it is Apache-2.0 and installs in
+one command. Stronger small models exist — `jina-embeddings-v5-text-nano` scores far higher
+for its size — but they are **CC BY-NC**, which anyone indexing work history would be
+violating without ever being told. If your use is genuinely non-commercial, point the
+variables above at one. If you work in more than English, `qwen3-embedding:0.6b` (Apache-2.0)
+handles multilingual history far better than `nomic`.
 
 ## Keeping the index fresh
 
