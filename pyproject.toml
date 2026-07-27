@@ -1,7 +1,28 @@
 [project]
 name = "session-recall"
 version = "0.4.0"
+description = "Semantic recall over your local Claude Code and Codex session history — one shared index, searchable by meaning"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Max Butorin" }]
+keywords = [
+    "claude-code", "codex", "mcp", "semantic-search", "embeddings",
+    "agent-memory", "session-history", "rag",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+]
 dependencies = [
     "sqlite-vec==0.1.9",
     "voyageai>=0.3.0",
@@ -21,8 +42,13 @@ session-recall-mcp = "session_recall.server:main"
 markers = ["live: hits real Voyage API (needs VOYAGE_API_KEY); excluded by default"]
 addopts = "-m 'not live'"
 
+[project.urls]
+Homepage = "https://github.com/AbsoluteMode/session-recall"
+Repository = "https://github.com/AbsoluteMode/session-recall"
+Issues = "https://github.com/AbsoluteMode/session-recall/issues"
+
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
