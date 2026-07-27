@@ -1,9 +1,27 @@
 # session-recall
 
-Local, agentic **semantic recall over your Claude Code and Codex session history** — one index
-shared by two different engines. Claude can read what Codex worked out yesterday, Codex can read
-Claude's, and neither needs you to re-explain it. Not a summary file someone maintains by hand:
-the actual turns, including tool calls and reasoning, searchable by meaning.
+**Shared memory for Claude Code and Codex.** Pick up work from a month ago without
+re-explaining it — and Claude can read what Codex worked out yesterday, because both engines
+feed one index. Not a summary file someone maintains by hand: the actual turns, including tool
+calls and reasoning, searchable by meaning.
+
+```console
+$ session-recall index
+indexed 2175 chunks from changed transcripts
+
+your history: 1052 sessions spanning 168 days, 40,035 searchable fragments
+  Claude Code 372 · Codex 680
+  busiest: sidekey, trend_detection, glitch
+```
+
+Then your agent stops asking you what you were doing:
+
+> **you:** we were fixing the auth token conflict between the two services — where did we land?
+>
+> **agent:** *(recall_search → expand_around)* Both services shared one OAuth account, and the
+> provider rotates refresh tokens per account, so each refresh invalidated the other's copy. You
+> rejected the shared-credentials-directory patch as too coupled, and settled on a keeper service
+> owning the session. The spec was never written — that was the next step.
 
 Five tools over MCP:
 

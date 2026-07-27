@@ -339,3 +339,33 @@ def test_dimension_change_fails_loudly_instead_of_looking_like_a_dead_embedder(t
     msg = str(exc.value).lower()
     assert "dimension" in msg, "the error must name the actual problem"
     assert "index" in msg, "and must say what to do about it"
+
+
+def test_corpus_summary_reports_what_was_actually_indexed(tmp_path):
+    """`indexed N chunks` tells a new user nothing about what they now have. The
+    summary has to answer 'what is in there' — how many sessions, over what span,
+    and from which engines, because a shared Claude+Codex history is the whole point
+    and is invisible in a chunk count."""
+    from session_recall.store import Store, corpus_summary
+
+    def chunk(uuid, session_id, project, ts, source="claude"):
+        return Chunk(session_id=session_id, uuid=uuid, role="user", text=uuid,
+                     project=project, cwd="/c", git_branch="b", ts=ts,
+                     file_path="/f.jsonl", byte_offset=0, byte_len=5, turn_index=0,
+                     content_hash=uuid, source=source)
+
+    s = Store(tmp_path / "sum.db")
+    day = 86400
+    vec = [0.0] * 1024
+    s.add(chunk("u1", "s1", "proj-a", 1_700_000_000), vec)
+    s.add(chunk("u2", "s1", "proj-a", 1_700_000_000 + day), vec)
+    s.add(chunk("u3", "s2", "proj-b", 1_700_000_000 + 2 * day, source="codex"), vec)
+    s.db.commit()
+
+    out = corpus_summary(s)
+    assert out["chunks"] == 3
+    assert out["sessions"] == 2
+    assert out["by_source"] == {"claude": 1, "codex": 1}, "sessions per engine, not chunks"
+    assert out["span_days"] == 2
+    assert out["top_projects"][0] == ("proj-a", 2), "busiest project first, with its chunk count"
+    s.close()

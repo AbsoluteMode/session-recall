@@ -1,6 +1,6 @@
 import argparse
 from . import config
-from .store import Store
+from .store import Store, corpus_summary
 from .embed import make_embedder
 from .rerank import make_reranker
 from .index import index_corpus
@@ -22,6 +22,28 @@ def _date_range(args, parser: argparse.ArgumentParser) -> tuple[int | None, int 
             args.start_date, args.end_date, args.timezone, on_date=args.date)
     except ValueError as exc:
         parser.error(str(exc))
+
+
+_SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex"}
+
+
+def _print_corpus_summary(store: Store) -> None:
+    """Say what the user now has. A raw chunk count reads as noise right after
+    install — the interesting facts are how far back the memory reaches and that
+    both engines feed it."""
+    s = corpus_summary(store)
+    if not s["sessions"]:
+        return
+    span = f" spanning {s['span_days']} days" if s["span_days"] else ""
+    print(f"\nyour history: {s['sessions']} sessions{span}, "
+          f"{s['chunks']:,} searchable fragments")
+    if s["by_source"]:
+        print("  " + " · ".join(
+            f"{_SOURCE_LABELS.get(src, src)} {n}"
+            for src, n in sorted(s["by_source"].items())))
+    if s["top_projects"]:
+        print("  busiest: " + ", ".join(p for p, _ in s["top_projects"]))
+    print('\ntry: session-recall search "why did we choose"')
 
 
 def main(argv=None):
@@ -63,6 +85,7 @@ def main(argv=None):
             codex_dirs=codex_roots,
         )
         print(f"indexed {n} chunks from changed transcripts")
+        _print_corpus_summary(store)
     elif args.cmd == "search":
         recall = Recall(store, make_embedder(), make_reranker())
         start_ts, end_ts = _date_range(args, parser)
