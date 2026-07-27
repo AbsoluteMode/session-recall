@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 from . import config
 from .store import Store, corpus_summary
 from .embed import make_embedder
@@ -25,6 +26,28 @@ def _date_range(args, parser: argparse.ArgumentParser) -> tuple[int | None, int 
 
 
 _SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex"}
+_ZONE_MARKS = {"GREEN": "ok  ", "AMBER": "warn", "RED": "FAIL"}
+
+
+def _run_health(store: Store) -> int:
+    """Print one row per dimension and a verdict. Exit code is non-zero on RED so a
+    timer or monitor can act on it without parsing the text."""
+    from .health import check_all
+
+    roots = {"claude": config.CLAUDE_PROJECTS, "codex": config.CODEX_SESSIONS}
+    transcripts = [p for root in (config.CLAUDE_PROJECTS, config.CODEX_SESSIONS,
+                                  config.CODEX_ARCHIVED_SESSIONS)
+                   if Path(root).is_dir() for p in Path(root).rglob("*.jsonl")]
+    report = check_all(store, make_embedder(), roots, transcripts)
+
+    width = max(len(d.name) for d in report.dimensions)
+    for d in report.dimensions:
+        print(f"[{_ZONE_MARKS[d.zone]}] {d.name.ljust(width)}  {d.detail}")
+        if d.hint:
+            print(f"{' ' * (width + 9)}→ {d.hint}")
+    print(f"\nverdict: {report.verdict}"
+          f" ({config.EMBED_PROVIDER}/{config.EMBED_MODEL}, index at {config.DB_PATH})")
+    return 1 if report.verdict == "RED" else 0
 
 
 def _print_corpus_summary(store: Store) -> None:
@@ -71,9 +94,12 @@ def main(argv=None):
     _add_date_args(gp)
     pp = sub.add_parser("prune")  # drop rows for transcripts deleted from disk
     pp.add_argument("--source", choices=("claude", "codex"))
+    sub.add_parser("health")  # is recall actually working right now?
     args = parser.parse_args(argv)
 
     store = Store(config.DB_PATH)
+    if args.cmd == "health":
+        return _run_health(store)
     if args.cmd == "index":
         claude_root = config.CLAUDE_PROJECTS if args.source in {"all", "claude"} else None
         codex_roots = ((config.CODEX_SESSIONS, config.CODEX_ARCHIVED_SESSIONS)

@@ -129,6 +129,24 @@ then on, so the index keeps up with both hosts on its own.
 
 ### Troubleshooting
 
+Start here — it checks the whole chain and exits non-zero when something is actually
+broken, so it also works from a timer:
+
+```console
+$ session-recall health
+[ok  ] Freshness  2 minutes behind
+[warn] Embedder   responded in 5828 ms
+                  → slow provider will make indexing crawl
+[ok  ] Corpus     1053 sessions (claude 373, codex 680)
+[ok  ] Sources    claude, codex present
+
+verdict: AMBER (voyage/voyage-4-large, index at ~/.local/share/session-recall/index.db)
+```
+
+Freshness compares the newest transcript on disk against the newest turn in the index,
+so an indexer that runs on every session and fails every time still shows as behind —
+which is exactly the failure that is otherwise invisible.
+
 | Symptom | Cause |
 |---|---|
 | `recall_search` answers with `degraded` set | The embedding provider is unreachable — only literal word matching ran. Results are still real, but a miss proves nothing. |
