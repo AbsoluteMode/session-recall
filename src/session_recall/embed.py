@@ -1,5 +1,6 @@
 import hashlib
 import math
+import os
 from typing import Protocol
 from . import config
 
@@ -59,28 +60,43 @@ class VoyageEmbedder:
         return self.client.embed([text], model=self.model, input_type="query").embeddings[0]
 
 
+def _openai_client(**kwargs):
+    """Constructing the SDK, isolated so tests can stand in for it without a network."""
+    from openai import OpenAI
+    return OpenAI(**kwargs)
+
+
 class OpenAIEmbedder:
-    """OpenAI-compatible embeddings — works with OpenAI and any provider exposing a
-    /v1/embeddings endpoint (point OPENAI_BASE_URL at it). Reads OPENAI_API_KEY from env.
-    Lazy client. `dim`, when set, is passed as the `dimensions` parameter (supported by
-    text-embedding-3-* and compatible models) so the vector matches the index dimension."""
-    def __init__(self, model: str | None = None, dim: int | None = None):
+    """OpenAI-compatible embeddings — OpenAI itself, or any server exposing
+    /v1/embeddings (Ollama, LM Studio, llama.cpp, vLLM). Lazy client.
+
+    `send_dimensions` exists because the parameter is not universal: OpenAI needs it so
+    the vector matches the index, while local servers reject the request outright when
+    it is present. Local servers also have no API key, but the SDK refuses to construct
+    without one, hence the placeholder."""
+    def __init__(self, model: str | None = None, dim: int | None = None,
+                 base_url: str | None = None, send_dimensions: bool | None = None):
         self.model = model or config.EMBED_MODEL
         self.dim = dim or config.EMBED_DIM
+        self.base_url = base_url if base_url is not None else config.EMBED_BASE_URL
+        self.send_dimensions = (config.EMBED_SEND_DIMENSIONS
+                                if send_dimensions is None else send_dimensions)
         self._client = None
 
     @property
     def client(self):
         if self._client is None:
-            from openai import OpenAI
-            self._client = OpenAI()
+            kwargs = {"api_key": os.environ.get("OPENAI_API_KEY") or "local-no-key"}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            self._client = _openai_client(**kwargs)
         return self._client
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for i in range(0, len(texts), 128):
             kw = {"model": self.model, "input": texts[i:i + 128]}
-            if self.dim:
+            if self.dim and self.send_dimensions:
                 kw["dimensions"] = self.dim
             out.extend(d.embedding for d in self.client.embeddings.create(**kw).data)
         return out

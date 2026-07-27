@@ -2,6 +2,7 @@
 # sqlite3 is compiled without SQLITE_ENABLE_LOAD_EXTENSION, so enable_load_extension()
 # and load_extension() are absent. pysqlite3 (wheel) provides them, which sqlite-vec
 # requires to load vec0. The rest of the API (execute, fetchall, etc.) is identical.
+import re
 import sqlite3
 if not hasattr(sqlite3.Connection, "enable_load_extension"):
     import pysqlite3 as sqlite3  # type: ignore[no-redef]  # macOS stdlib lacks extension loading
@@ -25,6 +26,25 @@ class Store:
         sqlite_vec.load(self.db)
         self.db.enable_load_extension(False)
         self._schema()
+        self._assert_dim_matches(db_path)
+
+    def _assert_dim_matches(self, db_path: Path) -> None:
+        """vec0 tables are fixed-width, so an index built with another embedder cannot
+        serve these vectors. Say that here: further down the raw sqlite error is caught
+        by the search degrade path and reported as an unreachable embedder, which sends
+        the user to debug something that is not broken."""
+        row = self.db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_chunks'"
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        found = re.search(r"FLOAT\[(\d+)\]", row[0])
+        if found and int(found.group(1)) != EMBED_DIM:
+            raise RuntimeError(
+                f"index at {db_path} stores {found.group(1)}-dimension vectors, but the "
+                f"configured embedder produces {EMBED_DIM}. A different embedding model "
+                f"needs its own index: delete that file and run `session-recall index` "
+                f"to rebuild it.")
 
     def _schema(self):
         col_defs = ", ".join(

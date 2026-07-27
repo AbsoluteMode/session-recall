@@ -319,3 +319,23 @@ def test_delete_file_leaves_no_orphans_when_rows_arrive_mid_delete(tmp_path):
         "WHERE c.id IS NULL").fetchone()[0] == 0
     intruder.close()
     victim.close()
+
+
+def test_dimension_change_fails_loudly_instead_of_looking_like_a_dead_embedder(tmp_path, monkeypatch):
+    """Switching embedding preset changes the vector width, and vec0 tables are
+    fixed-width. Without a check the raw sqlite error travels up into recall_search's
+    degrade path and is reported as 'embeddings unavailable' — sending the user to
+    debug a perfectly healthy embedder."""
+    import pytest
+    from session_recall import config, store as store_mod
+    from session_recall.store import Store
+
+    db = tmp_path / "dim.db"
+    Store(db).close()
+    monkeypatch.setattr(store_mod, "EMBED_DIM", config.EMBED_DIM // 2)
+
+    with pytest.raises(RuntimeError) as exc:
+        Store(db)
+    msg = str(exc.value).lower()
+    assert "dimension" in msg, "the error must name the actual problem"
+    assert "index" in msg, "and must say what to do about it"
