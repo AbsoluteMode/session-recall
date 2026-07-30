@@ -47,6 +47,18 @@ def add_parser(sub) -> None:
     ssub.add_parser("pending", help="list candidates waiting for approval")
     shp2 = ssub.add_parser("show", help="print one candidate in full")
     shp2.add_argument("id")
+    tgp = ssub.add_parser("tg-setup", help="bind the Telegram approval bot")
+    tgp.add_argument("--token", default=None,
+                     help="bot token (default: $SESSION_RECALL_TG_TOKEN)")
+    nfp = ssub.add_parser("notify", help="run the full loop: worker + TG approval + send")
+    nfp.add_argument("--once", action="store_true")
+    nfp.add_argument("--interval", type=int, default=5)
+    okp = ssub.add_parser("approve", help="approve a candidate locally (no TG)")
+    okp.add_argument("id")
+    okp.add_argument("version")
+    dcp = ssub.add_parser("decline", help="decline a candidate locally (no TG)")
+    dcp.add_argument("id")
+    dcp.add_argument("reason", nargs="*")
 
 
 def _sas_block(res: pairing.PairingResult) -> str:
@@ -161,6 +173,93 @@ def run(args: argparse.Namespace) -> int:
             for f in cand.findings:
                 print(f"  - {f['kind']}: {f['excerpt']}")
         print(f"\n--- candidate answer (v{cand.version}) ---\n{cand.text}")
+        return 0
+
+    if cmd == "tg-setup":
+        from .telegram import TgApi, TgConfig, save_config
+        token = args.token or os.environ.get("SESSION_RECALL_TG_TOKEN")
+        if not token:
+            print("need a bot token: --token or SESSION_RECALL_TG_TOKEN "
+                  "(create one via @BotFather)")
+            return 1
+        api = TgApi(token)
+        print("token saved. Now open your bot in Telegram and send it /start "
+              "(waiting up to 2 min)…")
+        cfg = TgConfig(token=token, chat_id=None)
+        save_config(sdir, cfg)
+        import time as _time
+        deadline = _time.time() + 120
+        offset = 0
+        while _time.time() < deadline:
+            for u in api.get_updates(offset, timeout=20):
+                offset = max(offset, u.get("update_id", 0) + 1)
+                msg = u.get("message") or {}
+                if (msg.get("text") or "").strip() == "/start":
+                    cfg.chat_id = msg["chat"]["id"]
+                    cfg.offset = offset
+                    save_config(sdir, cfg)
+                    api.send_message(cfg.chat_id,
+                                     "bound — approvals will arrive here")
+                    print(f"bound to chat {cfg.chat_id}")
+                    return 0
+        print("no /start received — run tg-setup again")
+        return 1
+
+    if cmd in ("approve", "decline"):
+        from . import approval
+        transport = from_env(os.environ, identity=ident)
+        if cmd == "approve":
+            cand = approval.approve(sdir, args.id, args.version)
+            if cand is None:
+                print("not approved: wrong version or not pending "
+                      f"(see: session-recall share show {args.id})")
+                return 1
+        else:
+            cand = approval.reject(sdir, args.id, " ".join(args.reason))
+            if cand is None:
+                print(f"nothing pending under {args.id!r}")
+                return 1
+        if transport is None:
+            print("decision recorded; no transport configured so nothing sent yet "
+                  f"— {_TRANSPORT_HINT}")
+            return 0
+        sent = approval.dispatch(ident, trust, sdir, transport)
+        for c in sent:
+            print(f"{'sent' if c.status != 'rejected' else 'decline sent'}: "
+                  f"{c.id} → {c.peer_name}")
+        return 0
+
+    if cmd == "notify":
+        from .notify import NotifyLoop
+        from .telegram import TgApi, load_config
+        from .envelope import ShareState
+        cfg = load_config(sdir)
+        if cfg is None or cfg.chat_id is None:
+            print("telegram not bound — run: session-recall share tg-setup")
+            return 1
+        transport = from_env(os.environ, identity=ident)
+        if transport is None:
+            print(_TRANSPORT_HINT)
+            return 1
+        from .. import config as _config
+        from ..embed import make_embedder
+        from ..rerank import make_reranker
+        from ..retrieve import Recall
+        from ..store import Store
+        store = Store(_config.DB_PATH)
+        recall = Recall(store, make_embedder(), make_reranker())
+        loop = NotifyLoop(TgApi(cfg.token), ident, trust,
+                          ShareState(sdir / "state.json"), transport,
+                          lambda q, k: recall.recall_search(q, k=k), sdir, cfg)
+        try:
+            if args.once:
+                stats = loop.tick()
+                print(stats)
+                return 0
+            print("approval loop running (Ctrl-C to stop)")
+            loop.run_forever(args.interval)
+        finally:
+            store.close()
         return 0
 
     if cmd == "trust":
