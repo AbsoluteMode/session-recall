@@ -39,6 +39,8 @@ def add_parser(sub) -> None:
     ap.add_argument("--remove", action="store_true")
     rlp = ssub.add_parser("relay", help="run the relay server (blind blob store)")
     rlp.add_argument("--port", type=int, default=8787)
+    rlp.add_argument("--host", default="127.0.0.1",
+                     help="bind address (default: localhost, for use behind TLS)")
     rlp.add_argument("--data", default=None,
                      help="storage dir (default: <data-dir>/share-relay)")
     svp = ssub.add_parser("serve", help="poll inbox, build candidate answers")
@@ -75,7 +77,8 @@ def run(args: argparse.Namespace) -> int:
     if cmd == "relay":
         from pathlib import Path
         from .relay import serve
-        serve(args.port, Path(args.data) if args.data else config.DATA_DIR / "share-relay")
+        serve(args.port, Path(args.data) if args.data else config.DATA_DIR / "share-relay",
+              host=args.host)
         return 0
 
     if cmd == "init":
