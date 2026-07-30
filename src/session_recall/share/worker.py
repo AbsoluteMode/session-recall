@@ -30,6 +30,7 @@ from typing import Callable, Iterable
 from nacl.encoding import RawEncoder
 from nacl import hash as nacl_hash
 
+from .ask import retrieval_query
 from .crypto import canonical
 from .envelope import Incoming, ShareState, open_incoming
 from .identity import Identity
@@ -59,6 +60,8 @@ class Candidate:
     findings: list = field(default_factory=list)
     status: str = "pending"   # pending | approved | rejected | expired
     version: str = ""         # /ok must quote this — approval of an exact blob
+    problem: str = ""         # symptoms the asker reported; last for compatibility
+    composed: bool = False    # True when an LLM wrote `text` from the fragments
 
     def compute_version(self) -> str:
         digest = nacl_hash.blake2b(
@@ -83,34 +86,47 @@ def _write_candidate(share_dir: Path, cand: Candidate) -> Path:
     return path
 
 
+def _digest(chunks: list) -> str:
+    """Deterministic fallback answer: the fragments themselves, with provenance.
+    Never leaves the machine to be produced, so it is what the owner gets when
+    no composer is configured or the provider is unreachable."""
+    return "\n\n".join(f"[{c['project']} · {c['session_id'][:8]} · {c['role']}]\n"
+                       f"{c['snippet']}" for c in chunks)
+
+
 def build_candidate(incoming: Incoming, searcher: Searcher,
-                    allowed_projects: list[str]) -> Candidate:
-    question = str(incoming.body.get("question", ""))[:2000]
-    task = str(incoming.body.get("task", ""))[:500]
-    anchors = list(searcher(question, 20)) if allowed_projects else []
+                    allowed_projects: list[str], composer=None) -> Candidate:
+    body = {"question": str(incoming.body.get("question", ""))[:2000],
+            "task": str(incoming.body.get("task", ""))[:500],
+            "problem": str(incoming.body.get("problem", ""))[:1000]}
+    anchors = list(searcher(retrieval_query(body), 20)) if allowed_projects else []
     picked = [a for a in anchors if a.project in allowed_projects][:MAX_CHUNKS]
 
     chunks = [{"project": a.project, "session_id": a.session_id, "uuid": a.uuid,
                "role": a.role, "snippet": a.snippet[:MAX_SNIPPET],
                "score": a.score, "source": a.source} for a in picked]
-    if chunks:
-        text = "\n\n".join(f"[{c['project']} · {c['session_id'][:8]} · {c['role']}]\n"
-                           f"{c['snippet']}" for c in chunks)
-    else:
+
+    composed = False
+    if not chunks:
         text = ("(nothing found within shareable scope — "
                 "see `session-recall share allow`)")
+    else:
+        written = composer(body, chunks) if composer else None
+        text, composed = (written, True) if written else (_digest(chunks), False)
 
     cand = Candidate(
         id=secrets.token_hex(4), peer_name=incoming.peer.name,
-        peer_address=incoming.peer.address, question=question, task=task,
+        peer_address=incoming.peer.address, question=body["question"],
+        task=body["task"], problem=body["problem"],
         reply_nonce=incoming.nonce, created_at=time.time(), text=text,
-        chunks=chunks, findings=[asdict(f) for f in scan(text)])
+        chunks=chunks, findings=[asdict(f) for f in scan(text)], composed=composed)
     cand.version = cand.compute_version()
     return cand
 
 
 def poll_once(identity: Identity, trust: TrustStore, state: ShareState,
-              transport, searcher: Searcher, share_dir: Path) -> list[Candidate]:
+              transport, searcher: Searcher, share_dir: Path,
+              composer=None) -> list[Candidate]:
     """One inbox sweep. Invalid envelopes vanish inside open_incoming (silent
     drop); valid requests become pending candidates on disk."""
     out = []
@@ -118,7 +134,8 @@ def poll_once(identity: Identity, trust: TrustStore, state: ShareState,
         incoming = open_incoming(identity, trust, state, raw)
         if incoming is None or incoming.kind != "req":
             continue
-        cand = build_candidate(incoming, searcher, trust.allowed_projects())
+        cand = build_candidate(incoming, searcher, trust.allowed_projects(),
+                               composer=composer)
         _write_candidate(share_dir, cand)
         out.append(cand)
     return out

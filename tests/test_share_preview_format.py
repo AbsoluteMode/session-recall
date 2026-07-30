@@ -142,6 +142,32 @@ def test_flagged_answer_is_withheld_in_markdown_too():
     assert "withheld" in out and "secret flags" in out
 
 
+def test_composed_answer_is_shown_not_rebuilt():
+    """A composed answer is the deliverable; the preview must show that prose,
+    not re-derive the fragment digest it was written from."""
+    c = _cand(text="Короткий ответ: запинили mcp<2. Где смотреть: session-recall.",
+              chunks=[_chunk("сырой сниппет который не должен вытеснить ответ")])
+    c.composed = True
+    out = preview(c, markdown=True)
+    assert "Короткий ответ" in out
+    assert "сырой сниппет" not in out
+    assert "written from 1 fragment" in out
+
+
+def test_raw_digest_is_labelled():
+    c = _cand(chunks=[_chunk("сырой сниппет")])
+    assert "raw 1 fragment" in preview(c, markdown=True)
+
+
+def test_problem_shown_as_untrusted():
+    c = _cand(task="поднимаю relay")
+    c.problem = "ModuleNotFoundError *fastmcp*"
+    out = preview(c, markdown=True)
+    assert "problem they hit" in out and "sender text, unverified" in out
+    body = out.split("problem they hit")[1]
+    assert body.split("\n", 1)[1].startswith("```")   # fenced, markup inert
+
+
 def test_plain_mode_unchanged():
     """The CLI/plain path must keep working for anyone not on Telegram."""
     c = _cand(chunks=[_chunk("a")])

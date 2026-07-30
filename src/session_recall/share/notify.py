@@ -37,10 +37,10 @@ def _cand_ref(message: dict) -> tuple[str, str] | None:
 class NotifyLoop:
     def __init__(self, api, identity: Identity, trust: TrustStore,
                  state: ShareState, transport, searcher: Searcher,
-                 share_dir: Path, cfg: TgConfig):
+                 share_dir: Path, cfg: TgConfig, composer=None):
         self.api, self.identity, self.trust = api, identity, trust
         self.state, self.transport, self.searcher = state, transport, searcher
-        self.share_dir, self.cfg = share_dir, cfg
+        self.share_dir, self.cfg, self.composer = share_dir, cfg, composer
 
     def _say(self, text: str, reply_to: int | None = None) -> None:
         self.api.send_message(self.cfg.chat_id, text, reply_to=reply_to)
@@ -91,7 +91,8 @@ class NotifyLoop:
         stats = {"previews": 0, "handled": 0, "sent": 0, "expired": 0}
 
         for cand in poll_once(self.identity, self.trust, self.state,
-                              self.transport, self.searcher, self.share_dir):
+                              self.transport, self.searcher, self.share_dir,
+                              composer=self.composer):
             self._say_preview(cand)
             stats["previews"] += 1
 

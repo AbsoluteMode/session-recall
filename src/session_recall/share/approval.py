@@ -28,8 +28,12 @@ def _answer_digest(cand: Candidate) -> tuple[str, int]:
     chunk cannot crowd out the rest), then a whole-message cap. Returns the
     text and how many characters were withheld — the owner must know the
     channel is showing less than what would actually be sent."""
-    if not cand.chunks:
-        return cand.text, 0
+    if getattr(cand, "composed", False) or not cand.chunks:
+        # a composed answer IS the deliverable — show it, don't rebuild it from
+        # the fragments it was written from
+        if len(cand.text) <= ANSWER_BUDGET:
+            return cand.text, 0
+        return cand.text[:ANSWER_BUDGET].rstrip() + " …", len(cand.text) - ANSWER_BUDGET
     parts = []
     for c in cand.chunks:
         snippet = c["snippet"]
@@ -69,10 +73,16 @@ def preview(cand: Candidate, redact: bool | None = None,
         out.append(f"📥 *request from* {span(cand.peer_name)}")
         out.append(f"*question*\n{block(cand.question)}")
 
+    # Both are the sender's own words — shown so the owner can judge the ask,
+    # fenced so they cannot pose as ours.
     if cand.task:
-        label = "stated task (sender text, unverified)"
+        label = "what they are doing (sender text, unverified)"
         out.append(f'{label}: "{cand.task}"' if plain
                    else f"*{esc(label)}*\n{block(cand.task)}")
+    if getattr(cand, "problem", ""):
+        label = "problem they hit (sender text, unverified)"
+        out.append(f'{label}: "{cand.problem}"' if plain
+                   else f"*{esc(label)}*\n{block(cand.problem)}")
 
     if cand.findings:
         kinds = ", ".join(sorted({f["kind"] for f in cand.findings}))
@@ -92,7 +102,10 @@ def preview(cand: Candidate, redact: bool | None = None,
         # our own chrome needs escaping too: parentheses and dots are reserved
         # in MarkdownV2, and an unescaped one makes Telegram reject the whole
         # message rather than render it oddly
-        counts = f"{len(cand.chunks)} fragment(s)"
+        # who wrote it matters to the reader: a composed answer is prose the
+        # model derived from the fragments, a digest is the fragments verbatim
+        counts = "written from " if getattr(cand, "composed", False) else "raw "
+        counts += f"{len(cand.chunks)} fragment(s)"
         if withheld > 0:
             counts += f" · {withheld} more chars on send"
         out.append(f"*answer* · {esc(counts)} · `v{esc(cand.version)}`\n{block(body)}")

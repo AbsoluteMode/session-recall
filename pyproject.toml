@@ -34,6 +34,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-mock>=3.12"]
 openai = ["openai>=1.0"]
+# Optional: lets the share worker write a real answer from retrieved fragments
+# instead of returning them raw. Off unless SESSION_RECALL_COMPOSE=claude.
+compose = ["anthropic>=0.116"]
 
 [project.scripts]
 session-recall = "session_recall.cli:main"
