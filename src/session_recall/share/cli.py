@@ -37,6 +37,10 @@ def add_parser(sub) -> None:
     ap = ssub.add_parser("allow", help="mark a project shareable (no arg: list)")
     ap.add_argument("project", nargs="?")
     ap.add_argument("--remove", action="store_true")
+    rlp = ssub.add_parser("relay", help="run the relay server (blind blob store)")
+    rlp.add_argument("--port", type=int, default=8787)
+    rlp.add_argument("--data", default=None,
+                     help="storage dir (default: <data-dir>/share-relay)")
 
 
 def _sas_block(res: pairing.PairingResult) -> str:
@@ -49,6 +53,12 @@ def _sas_block(res: pairing.PairingResult) -> str:
 def run(args: argparse.Namespace) -> int:
     sdir = config.DATA_DIR / "share"
     cmd = args.share_cmd
+
+    if cmd == "relay":
+        from pathlib import Path
+        from .relay import serve
+        serve(args.port, Path(args.data) if args.data else config.DATA_DIR / "share-relay")
+        return 0
 
     if cmd == "init":
         try:
@@ -68,7 +78,7 @@ def run(args: argparse.Namespace) -> int:
     trust = TrustStore(sdir / "trust.json")
 
     if cmd in ("invite", "join", "complete"):
-        transport = from_env(os.environ)
+        transport = from_env(os.environ, identity=ident)
         if transport is None:
             print(_TRANSPORT_HINT)
             return 1
