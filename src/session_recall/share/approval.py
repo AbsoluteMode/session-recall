@@ -19,25 +19,91 @@ from .worker import Candidate, list_pending, load_candidate, set_status
 PENDING_TTL_S = 24 * 3600
 
 
-def preview(cand: Candidate, redact: bool | None = None) -> str:
+ANSWER_BUDGET = 1400   # chars of answer shown in the channel, before truncation
+SNIPPET_BUDGET = 320   # per fragment, so five fragments cannot bury the verdict
+
+
+def _answer_digest(cand: Candidate) -> tuple[str, int]:
+    """Answer trimmed for a phone screen. Per-fragment caps first (so one long
+    chunk cannot crowd out the rest), then a whole-message cap. Returns the
+    text and how many characters were withheld — the owner must know the
+    channel is showing less than what would actually be sent."""
+    if not cand.chunks:
+        return cand.text, 0
+    parts = []
+    for c in cand.chunks:
+        snippet = c["snippet"]
+        if len(snippet) > SNIPPET_BUDGET:
+            snippet = snippet[:SNIPPET_BUDGET].rstrip() + " …"
+        parts.append(f"{c['project']} · {c['session_id'][:8]} · {c['role']}\n{snippet}")
+    body = "\n\n".join(parts)
+    if len(body) <= ANSWER_BUDGET:
+        return body, max(0, len(cand.text) - len(body))
+    cut = body[:ANSWER_BUDGET].rstrip() + " …"
+    return cut, len(cand.text) - len(cut)
+
+
+def preview(cand: Candidate, redact: bool | None = None,
+            markdown: bool = False) -> str:
     """The message the owner sees. `redact` hides the answer body — forced on
     when the scanner flagged anything, because flagged text must not travel
-    through a third-party notification channel (gate §6)."""
+    through a third-party notification channel (gate §6).
+
+    With markdown=True the layout uses MarkdownV2: our labels carry the markup,
+    every untrusted string sits in a code fence (see telegram.fence), and the
+    /ok line is a code span so Telegram makes it tap-to-copy.
+    """
+    from .telegram import escape_md, fence, inline_code
+
     redact = bool(cand.findings) if redact is None else redact
-    lines = [f"[{cand.id} v{cand.version}] request from {cand.peer_name}",
-             f"question: {cand.question}"]
+    plain = not markdown
+    esc = (lambda s: s) if plain else escape_md
+    block = (lambda s: s) if plain else fence
+    span = (lambda s: s) if plain else inline_code
+
+    out = []
+    if plain:
+        out.append(f"[{cand.id} v{cand.version}] request from {cand.peer_name}")
+        out.append(f"question: {cand.question}")
+    else:
+        out.append(f"📥 *request from* {span(cand.peer_name)}")
+        out.append(f"*question*\n{block(cand.question)}")
+
     if cand.task:
-        lines.append(f'stated task (sender text, unverified): "{cand.task}"')
+        label = "stated task (sender text, unverified)"
+        out.append(f'{label}: "{cand.task}"' if plain
+                   else f"*{esc(label)}*\n{block(cand.task)}")
+
     if cand.findings:
         kinds = ", ".join(sorted({f["kind"] for f in cand.findings}))
-        lines.append(f"⚠ SECRET FLAGS: {kinds}")
+        out.append(f"⚠ SECRET FLAGS: {kinds}" if plain
+                   else f"⚠️ *secret flags*: {esc(kinds)}")
+
     if redact:
-        lines.append(f"[answer withheld from this channel — review locally: "
-                     f"session-recall share show {cand.id}]")
+        hint = f"session-recall share show {cand.id}"
+        out.append(f"[answer withheld from this channel — review locally: {hint}]"
+                   if plain else
+                   f"_answer withheld from this channel_ — review locally:\n"
+                   f"{span(hint)}")
+    elif plain:
+        out.append(f"--- answer v{cand.version} ---\n{cand.text}")
     else:
-        lines.append(f"--- answer v{cand.version} ---\n{cand.text}")
-    lines.append(f"approve: /ok {cand.version}   decline: /no <reason>")
-    return "\n".join(lines)
+        body, withheld = _answer_digest(cand)
+        # our own chrome needs escaping too: parentheses and dots are reserved
+        # in MarkdownV2, and an unescaped one makes Telegram reject the whole
+        # message rather than render it oddly
+        counts = f"{len(cand.chunks)} fragment(s)"
+        if withheld > 0:
+            counts += f" · {withheld} more chars on send"
+        out.append(f"*answer* · {esc(counts)} · `v{esc(cand.version)}`\n{block(body)}")
+
+    if plain:
+        out.append(f"approve: /ok {cand.version}   decline: /no <reason>")
+    else:
+        out.append(f"*approve* — reply to this message with:\n"
+                   f"`/ok {esc(cand.version)}`\n"
+                   f"*decline*: `/no <reason>`")
+    return "\n".join(out) if plain else "\n\n".join(out)
 
 
 def approve(share_dir: Path, cand_id: str, version: str) -> Candidate | None:

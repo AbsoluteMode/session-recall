@@ -45,6 +45,18 @@ class NotifyLoop:
     def _say(self, text: str, reply_to: int | None = None) -> None:
         self.api.send_message(self.cfg.chat_id, text, reply_to=reply_to)
 
+    def _say_preview(self, cand) -> None:
+        """Markdown first, plain text if Telegram rejects it. A preview that
+        fails to render must still arrive — silence would look exactly like
+        'no one asked anything', and nothing can be approved unseen."""
+        from .telegram import MARKDOWN
+        try:
+            self.api.send_message(self.cfg.chat_id,
+                                  approval.preview(cand, markdown=True),
+                                  parse_mode=MARKDOWN)
+        except Exception:
+            self._say(approval.preview(cand))
+
     def _handle(self, message: dict) -> None:
         text = (message.get("text") or "").strip()
         mid = message.get("message_id")
@@ -80,7 +92,7 @@ class NotifyLoop:
 
         for cand in poll_once(self.identity, self.trust, self.state,
                               self.transport, self.searcher, self.share_dir):
-            self._say(approval.preview(cand))
+            self._say_preview(cand)
             stats["previews"] += 1
 
         stats["expired"] = len(approval.expire_stale(self.share_dir, now))
