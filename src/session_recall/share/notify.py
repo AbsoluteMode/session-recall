@@ -25,7 +25,8 @@ from .trust import TrustStore
 from .worker import Searcher, poll_once
 
 _REF_RE = re.compile(r"^\[([0-9a-f]{8}) v([0-9a-f]{8})\]")
-_USAGE = "usage: reply to a preview with `/ok <version>` or `/no <reason>`"
+_USAGE = ("usage: reply to a preview with `/ok <version>`, `/no <reason>`, "
+          "or just write your own answer and it goes as-is")
 
 
 def _cand_ref(message: dict) -> tuple[str, str] | None:
@@ -60,12 +61,25 @@ class NotifyLoop:
     def _handle(self, message: dict) -> None:
         text = (message.get("text") or "").strip()
         mid = message.get("message_id")
-        if not (text.startswith("/ok") or text.startswith("/no")):
+        if not text:
             return
         ref = _cand_ref(message)
         if ref is None:
-            return self._say(_USAGE, reply_to=mid)
+            # a command needs a preview to point at; anything else is noise
+            return self._say(_USAGE, reply_to=mid) if text.startswith("/") else None
         cand_id, _preview_version = ref  # the reply names the candidate…
+
+        if not text.startswith("/"):
+            # plain text replied into a thread is the owner answering in their
+            # own words — authorship is the authorization, so it just goes
+            from .worker import load_candidate
+            cand = load_candidate(self.share_dir, cand_id)
+            if cand is None or not cand.thread:
+                return self._say(f"nothing to reply to under {cand_id}", reply_to=mid)
+            ok = approval.own_message(self.identity, self.trust, self.share_dir,
+                                      self.transport, cand.thread, text)
+            return self._say(f"sent to {cand.peer_name}" if ok else
+                             "not sent: thread closed or peer revoked", reply_to=mid)
 
         if text.startswith("/ok"):
             parts = text.split()

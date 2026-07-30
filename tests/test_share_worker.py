@@ -159,7 +159,7 @@ def test_composer_writes_the_answer(world):
         task="поднимаю relay", problem="ModuleNotFoundError fastmcp"))
     seen = {}
 
-    def composer(req, chunks):
+    def composer(req, chunks, turns=None):
         seen.update(req)
         return "запинили mcp<2, смотри session-recall · 07876709"
 
@@ -177,7 +177,7 @@ def test_composer_failure_falls_back_to_digest(world):
     _ask(egor, maxim, transport)
     cand = poll_once(maxim, trust, state, transport,
                      lambda q, k: [_anchor("session-recall")], sdir,
-                     composer=lambda req, chunks: None)[0]
+                     composer=lambda req, chunks, turns=None: None)[0]
     assert cand.composed is False
     assert "how we fixed it" in cand.text
 
@@ -200,7 +200,7 @@ def test_secret_in_composed_answer_still_flagged(world):
     _ask(egor, maxim, transport)
     cand = poll_once(maxim, trust, state, transport,
                      lambda q, k: [_anchor("session-recall")], sdir,
-                     composer=lambda req, chunks: "ключ был AKIAIOSFODNN7EXAMPLE")[0]
+                     composer=lambda req, chunks, turns=None: "ключ был AKIAIOSFODNN7EXAMPLE")[0]
     assert any(f["kind"] == "aws-access-key" for f in cand.findings)
 
 

@@ -30,6 +30,7 @@ from typing import Callable, Iterable
 from nacl.encoding import RawEncoder
 from nacl import hash as nacl_hash
 
+from . import thread as thread_mod
 from .ask import retrieval_query
 from .crypto import canonical
 from .envelope import Incoming, ShareState, open_incoming
@@ -62,6 +63,7 @@ class Candidate:
     version: str = ""         # /ok must quote this — approval of an exact blob
     problem: str = ""         # symptoms the asker reported; last for compatibility
     composed: bool = False    # True when an LLM wrote `text` from the fragments
+    thread: str = ""          # conversation this answer belongs to
 
     def compute_version(self) -> str:
         digest = nacl_hash.blake2b(
@@ -95,7 +97,8 @@ def _digest(chunks: list) -> str:
 
 
 def build_candidate(incoming: Incoming, searcher: Searcher,
-                    allowed_projects: list[str], composer=None) -> Candidate:
+                    allowed_projects: list[str], composer=None,
+                    turns: list | None = None) -> Candidate:
     body = {"question": str(incoming.body.get("question", ""))[:2000],
             "task": str(incoming.body.get("task", ""))[:500],
             "problem": str(incoming.body.get("problem", ""))[:1000]}
@@ -111,15 +114,27 @@ def build_candidate(incoming: Incoming, searcher: Searcher,
         text = ("(nothing found within shareable scope — "
                 "see `session-recall share allow`)")
     else:
-        written = composer(body, chunks) if composer else None
+        written = composer(body, chunks, turns) if composer else None
         text, composed = (written, True) if written else (_digest(chunks), False)
+
+    # the scanner runs on the sources too: a composed answer can look clean
+    # while the model was reading secret-adjacent material, and the owner
+    # should know to open that one locally
+    findings = [asdict(f) for f in scan(text)]
+    seen = {(f["kind"], f["excerpt"]) for f in findings}
+    for c in chunks:
+        for f in scan(c["snippet"]):
+            if (f.kind, f.excerpt) not in seen:
+                seen.add((f.kind, f.excerpt))
+                findings.append({**asdict(f), "in": "source"})
 
     cand = Candidate(
         id=secrets.token_hex(4), peer_name=incoming.peer.name,
         peer_address=incoming.peer.address, question=body["question"],
         task=body["task"], problem=body["problem"],
         reply_nonce=incoming.nonce, created_at=time.time(), text=text,
-        chunks=chunks, findings=[asdict(f) for f in scan(text)], composed=composed)
+        chunks=chunks, findings=findings, composed=composed,
+        thread=str(incoming.body.get("thread", ""))[:32])
     cand.version = cand.compute_version()
     return cand
 
@@ -134,8 +149,18 @@ def poll_once(identity: Identity, trust: TrustStore, state: ShareState,
         incoming = open_incoming(identity, trust, state, raw)
         if incoming is None or incoming.kind != "req":
             continue
+        thread_id = str(incoming.body.get("thread", ""))[:32] or thread_mod.new_id()
+        convo = thread_mod.open_or_create(share_dir, thread_id,
+                                          incoming.peer.address, incoming.peer.name)
+        if convo.closed or convo.should_close():
+            convo.closed = True          # a thread this old is a standing channel
+            thread_mod.save(share_dir, convo)
+            continue
         cand = build_candidate(incoming, searcher, trust.allowed_projects(),
-                               composer=composer)
+                               composer=composer, turns=convo.context())
+        cand.thread = thread_id
+        convo.append("peer", cand.question, kind="question")
+        thread_mod.save(share_dir, convo)
         _write_candidate(share_dir, cand)
         out.append(cand)
     return out

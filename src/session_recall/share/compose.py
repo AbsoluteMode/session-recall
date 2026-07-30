@@ -16,10 +16,13 @@ deterministic snippet digest, which never leaves the machine.
 """
 
 import os
+import subprocess
+import tempfile
 from typing import Callable
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 4000
+CLI_TIMEOUT_S = 180
 
 Composer = Callable[[dict, list], str | None]
 
@@ -31,10 +34,15 @@ helpfulness — a confident guess wastes their time.
 
 Structure the answer as:
 1. A direct answer to what they want to know, in a few sentences.
-2. "Где смотреть" / "Where to look": the specific fragments carrying the \
-detail — name the project and session id shown on each fragment, and any file, \
-PR, command or error string they contain.
+2. Anything in the fragments the asker can act on or open for themselves: pull \
+request or issue numbers, commit hashes, file paths, package versions, exact \
+commands, error strings. Quote them precisely — these are what make an answer \
+usable instead of merely reassuring.
 3. What the fragments do NOT answer, if anything, stated plainly.
+
+Never cite session ids, transcript locations, or dates of the owner's own \
+work — the asker has no access to those and they reveal nothing useful. Cite \
+artifacts that exist outside the owner's machine.
 
 Rules:
 - Ground every claim in the fragments. Never invent file names, commands, \
@@ -59,9 +67,18 @@ def _fragments(chunks: list) -> str:
     return "\n".join(parts)
 
 
-def _prompt(req: dict, chunks: list) -> str:
+def _history(turns: list) -> str:
+    if not turns:
+        return ""
+    lines = [f"<turn author=\"{t['author']}\">{t['text']}</turn>" for t in turns]
+    return ("<earlier_in_this_conversation>\n" + "\n".join(lines) +
+            "\n</earlier_in_this_conversation>\n\n")
+
+
+def _prompt(req: dict, chunks: list, turns: list | None = None) -> str:
     return (
         "A colleague is asking about work recorded in these fragments.\n\n"
+        + _history(turns or []) +
         "<request>\n"
         f"What they are doing: {req.get('task', '(not stated)')}\n"
         f"Problem and symptoms: {req.get('problem', '(not stated)')}\n"
@@ -71,13 +88,51 @@ def _prompt(req: dict, chunks: list) -> str:
         "Write the answer.")
 
 
-def make_composer(env: dict | None = None, client=None) -> Composer | None:
-    """None means "no composer configured" — the caller keeps the deterministic
-    digest. `client` is injectable so tests never touch the network."""
-    env = os.environ if env is None else env
-    if (env.get("SESSION_RECALL_COMPOSE") or "none").strip().lower() != "claude":
-        return None
+def _cli_composer(runner=None) -> Composer:
+    """Compose through the locally installed `claude` CLI.
 
+    Costs nothing beyond the existing subscription and needs no API key, but the
+    CLI is a full agent by default, so the invocation strips it to text-in /
+    text-out: `--tools ""` removes every built-in tool and `--strict-mcp-config`
+    ignores every configured MCP server. The prompt goes on argv, never through
+    a shell — no shell means no quoting bug can turn retrieved text into a
+    command. The working directory is an empty temp dir so no project's
+    CLAUDE.md is discovered.
+
+    Known consequence, deliberately left to the operator: print mode writes a
+    session transcript under CLAUDE_CONFIG_DIR, which session-recall indexes by
+    default. Point CLAUDE_CONFIG_DIR at a scratch directory (or exclude it from
+    indexing) before real use, or a peer's question re-enters your own index and
+    later surfaces as if it were your own past work.
+    """
+    def run(args, cwd):
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                              timeout=CLI_TIMEOUT_S)
+
+    runner = runner or run
+
+    def compose(req: dict, chunks: list, turns: list | None = None) -> str | None:
+        if not chunks:
+            return None
+        with tempfile.TemporaryDirectory() as empty:
+            try:
+                done = runner([
+                    "claude", "-p",
+                    "--tools", "",
+                    "--strict-mcp-config",
+                    "--system-prompt", _SYSTEM,
+                    _prompt(req, chunks, turns),
+                ], empty)
+            except (OSError, subprocess.SubprocessError):
+                return None
+        if getattr(done, "returncode", 1) != 0:
+            return None
+        return (done.stdout or "").strip() or None
+
+    return compose
+
+
+def _api_composer(client=None) -> Composer | None:
     if client is None:
         try:
             import anthropic
@@ -85,7 +140,7 @@ def make_composer(env: dict | None = None, client=None) -> Composer | None:
             return None
         client = anthropic.Anthropic()
 
-    def compose(req: dict, chunks: list) -> str | None:
+    def compose(req: dict, chunks: list, turns: list | None = None) -> str | None:
         if not chunks:
             return None
         try:
@@ -95,7 +150,8 @@ def make_composer(env: dict | None = None, client=None) -> Composer | None:
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
                 system=_SYSTEM,
-                messages=[{"role": "user", "content": _prompt(req, chunks)}],
+                messages=[{"role": "user",
+                           "content": _prompt(req, chunks, turns)}],
             )
         except Exception:
             return None          # provider down → deterministic digest, never a gap
@@ -105,3 +161,16 @@ def make_composer(env: dict | None = None, client=None) -> Composer | None:
         return text.strip() or None
 
     return compose
+
+
+def make_composer(env: dict | None = None, client=None, runner=None) -> Composer | None:
+    """None means "no composer configured" — the caller keeps the deterministic
+    digest. `client`/`runner` are injectable so tests never touch the network or
+    spawn a process."""
+    env = os.environ if env is None else env
+    engine = (env.get("SESSION_RECALL_COMPOSE") or "none").strip().lower()
+    if engine in ("claude-cli", "cli"):
+        return _cli_composer(runner=runner)
+    if engine in ("claude", "api", "claude-api"):
+        return _api_composer(client=client)
+    return None

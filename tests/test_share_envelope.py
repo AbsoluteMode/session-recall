@@ -34,7 +34,7 @@ def test_request_roundtrip(world):
     assert got is not None
     assert got.kind == "req"
     assert got.body == {"question": "how did you fix the CI?", "task": "debug",
-                        "problem": ""}
+                        "problem": "", "thread": ""}
     assert got.peer.name == "egor"
 
 
@@ -46,7 +46,7 @@ def test_response_roundtrip(world):
     egor_state = ShareState(maxim_trust.path.parent / "egor-state.json")
     got_resp = open_incoming(egor, egor_trust, egor_state, resp)
     assert got_resp.kind == "resp"
-    assert got_resp.body == {"text": "the answer"}
+    assert got_resp.body == {"text": "the answer", "thread": "", "sources": 0}
     assert got_resp.in_reply_to == got.nonce
 
 

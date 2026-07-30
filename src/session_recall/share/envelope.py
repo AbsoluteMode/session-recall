@@ -98,17 +98,26 @@ def _sealed(identity: Identity, peer_box_pk: str, kind: str, body: dict,
 
 
 def make_request(identity: Identity, peer: Peer | dict, question: str,
-                 task: str = "", problem: str = "") -> bytes:
+                 task: str = "", problem: str = "", thread: str = "") -> bytes:
+    """`thread` rides inside the encrypted body on purpose: the relay must not
+    learn which envelopes belong to the same conversation."""
     box_pk = peer.box_pk if isinstance(peer, Peer) else peer["box_pk"]
     address = peer.address if isinstance(peer, Peer) else peer["address"]
     return _sealed(identity, box_pk, "req",
-                   {"question": question, "task": task, "problem": problem},
+                   {"question": question, "task": task, "problem": problem,
+                    "thread": thread},
                    address, None)
 
 
 def make_response(identity: Identity, peer: Peer, text: str,
-                  in_reply_to: str) -> bytes:
-    return _sealed(identity, peer.box_pk, "resp", {"text": text},
+                  in_reply_to: str, thread: str = "", sources: int = 0) -> bytes:
+    """Raw transcript never crosses. What goes out is the answer — the same
+    thing the owner would have said after reading their own history — plus how
+    many fragments it rests on, so the asker can tell a grounded answer from a
+    guess. Session ids and project names stay home: the asker could not read
+    them anyway, and they are exactly the metadata worth not leaking."""
+    return _sealed(identity, peer.box_pk, "resp",
+                   {"text": text, "thread": thread, "sources": sources},
                    peer.address, in_reply_to)
 
 
