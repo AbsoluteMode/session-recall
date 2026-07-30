@@ -76,14 +76,21 @@ class FileTransport:
 
 class HttpRelayTransport:
     """Client for the minimal relay service. stdlib urllib on purpose — the
-    relay API is four endpoints and not worth a dependency."""
+    relay API is four endpoints and not worth a dependency.
 
-    def __init__(self, base_url: str):
+    `identity` is needed for fetch_mail only: consuming an inbox is
+    destructive, so the relay demands a signature (see relay.check_fetch);
+    everything else stays anonymous."""
+
+    def __init__(self, base_url: str, identity=None):
         self.base = base_url.rstrip("/")
+        self.identity = identity
 
-    def _request(self, method: str, path: str, body: bytes | None = None) -> bytes | None:
+    def _request(self, method: str, path: str, body: bytes | None = None,
+                 headers: dict | None = None) -> bytes | None:
+        all_headers = {"Content-Type": "application/octet-stream", **(headers or {})}
         req = urllib.request.Request(self.base + path, data=body, method=method,
-                                     headers={"Content-Type": "application/octet-stream"})
+                                     headers=all_headers)
         try:
             with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
                 return resp.read()
@@ -102,7 +109,9 @@ class HttpRelayTransport:
         self._request("POST", f"/mail/{address}", blob)
 
     def fetch_mail(self, address: str) -> list[bytes]:
-        raw = self._request("GET", f"/mail/{address}?consume=1")
+        from .relay import fetch_auth_headers
+        headers = fetch_auth_headers(self.identity, address) if self.identity else {}
+        raw = self._request("GET", f"/mail/{address}", headers=headers)
         if not raw:
             return []
         items = json.loads(raw)
@@ -110,11 +119,11 @@ class HttpRelayTransport:
         return [base64.b64decode(i) for i in items]
 
 
-def from_env(env: dict) -> Transport | None:
+def from_env(env: dict, identity=None) -> Transport | None:
     """Relay URL wins; a shared directory is the zero-infra fallback."""
     url = env.get("SESSION_RECALL_RELAY_URL")
     if url:
-        return HttpRelayTransport(url)
+        return HttpRelayTransport(url, identity=identity)
     root = env.get("SESSION_RECALL_SHARE_TRANSPORT_DIR")
     if root:
         return FileTransport(Path(root))
