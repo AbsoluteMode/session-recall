@@ -41,6 +41,12 @@ def add_parser(sub) -> None:
     rlp.add_argument("--port", type=int, default=8787)
     rlp.add_argument("--data", default=None,
                      help="storage dir (default: <data-dir>/share-relay)")
+    svp = ssub.add_parser("serve", help="poll inbox, build candidate answers")
+    svp.add_argument("--once", action="store_true", help="single sweep, then exit")
+    svp.add_argument("--interval", type=int, default=30)
+    ssub.add_parser("pending", help="list candidates waiting for approval")
+    shp2 = ssub.add_parser("show", help="print one candidate in full")
+    shp2.add_argument("id")
 
 
 def _sas_block(res: pairing.PairingResult) -> str:
@@ -96,6 +102,65 @@ def run(args: argparse.Namespace) -> int:
         except PairingError as exc:
             print(f"pairing failed: {exc}")
             return 1
+        return 0
+
+    if cmd == "serve":
+        transport = from_env(os.environ, identity=ident)
+        if transport is None:
+            print(_TRANSPORT_HINT)
+            return 1
+        import time as _time
+        from .. import config as _config
+        from ..embed import make_embedder
+        from ..rerank import make_reranker
+        from ..retrieve import Recall
+        from ..store import Store
+        from .envelope import ShareState
+        from .worker import poll_once
+        store = Store(_config.DB_PATH)
+        recall = Recall(store, make_embedder(), make_reranker())
+        searcher = lambda q, k: recall.recall_search(q, k=k)
+        state = ShareState(sdir / "state.json")
+        try:
+            while True:
+                for cand in poll_once(ident, trust, state, transport, searcher, sdir):
+                    flags = f"  ⚠ {len(cand.findings)} secret flag(s)" if cand.findings else ""
+                    print(f"[{cand.id} v{cand.version}] {cand.peer_name}: "
+                          f"{cand.question[:80]}{flags}\n"
+                          f"  review: session-recall share show {cand.id}")
+                if args.once:
+                    return 0
+                _time.sleep(args.interval)
+        finally:
+            store.close()
+
+    if cmd == "pending":
+        from .worker import list_pending
+        cands = list_pending(sdir)
+        if not cands:
+            print("no pending candidates")
+            return 0
+        for c in cands:
+            flags = f"  ⚠ {len(c.findings)}" if c.findings else ""
+            print(f"{c.id} v{c.version}  {c.peer_name}  {c.question[:70]}{flags}")
+        return 0
+
+    if cmd == "show":
+        from .worker import load_candidate
+        cand = load_candidate(sdir, args.id)
+        if cand is None:
+            print(f"no candidate {args.id!r}")
+            return 1
+        print(f"id: {cand.id}   version: {cand.version}   status: {cand.status}\n"
+              f"from: {cand.peer_name} ({cand.peer_address})\n"
+              f"question: {cand.question}")
+        if cand.task:
+            print(f'stated task (sender text, unverified): "{cand.task}"')
+        if cand.findings:
+            print("\n⚠ SECRET FLAGS — look closely before approving:")
+            for f in cand.findings:
+                print(f"  - {f['kind']}: {f['excerpt']}")
+        print(f"\n--- candidate answer (v{cand.version}) ---\n{cand.text}")
         return 0
 
     if cmd == "trust":
