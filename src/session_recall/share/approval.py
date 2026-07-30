@@ -119,6 +119,27 @@ def preview(cand: Candidate, redact: bool | None = None,
     return "\n".join(out) if plain else "\n\n".join(out)
 
 
+def own_message(identity: Identity, trust: TrustStore, share_dir: Path,
+                transport, thread_id: str, text: str) -> bool:
+    """The owner answering in their own words. No approval step: they authored
+    it, which IS the authorization — a second confirmation on your own typing
+    is ritual, not a gate. Everything else (revoked peer, closed thread) still
+    fails closed."""
+    from . import thread as thread_mod
+    convo = thread_mod.load(share_dir, thread_id)
+    if convo is None or convo.closed or not text.strip():
+        return False
+    peer = trust.get_by_address(convo.peer_address)
+    if peer is None:
+        return False
+    transport.post_mail(peer.address,
+                        make_response(identity, peer, text.strip(),
+                                      in_reply_to="", thread=thread_id))
+    convo.append("owner", text.strip())
+    thread_mod.save(share_dir, convo)
+    return True
+
+
 def approve(share_dir: Path, cand_id: str, version: str) -> Candidate | None:
     """None unless `version` matches the stored candidate exactly."""
     cand = load_candidate(share_dir, cand_id)
@@ -169,7 +190,9 @@ def dispatch(identity: Identity, trust: TrustStore, share_dir: Path,
             continue
         transport.post_mail(peer.address,
                             make_response(identity, peer, cand.text,
-                                          in_reply_to=cand.reply_nonce))
+                                          in_reply_to=cand.reply_nonce,
+                                          thread=cand.thread,
+                                          sources=len(cand.chunks)))
         # keep the audit trail honest: a delivered decline is not an answer
         set_status(share_dir, cand.id,
                    "sent" if cand.status == "approved" else "declined-sent")

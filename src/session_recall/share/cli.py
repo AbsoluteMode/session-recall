@@ -60,6 +60,10 @@ def add_parser(sub) -> None:
     akp.add_argument("--doing", required=True, help="what you are working on")
     akp.add_argument("--problem", required=True, help="what broke, with symptoms")
     akp.add_argument("--want", required=True, help="what you want to know")
+    rpp = ssub.add_parser("reply", help="continue a conversation you started")
+    rpp.add_argument("thread")
+    rpp.add_argument("text", nargs="+")
+    ssub.add_parser("threads", help="list conversations")
     ssub.add_parser("fetch", help="collect answers peers have sent you")
     okp = ssub.add_parser("approve", help="approve a candidate locally (no TG)")
     okp.add_argument("id")
@@ -187,13 +191,47 @@ def run(args: argparse.Namespace) -> int:
         print(f"\n--- candidate answer (v{cand.version}) ---\n{cand.text}")
         return 0
 
-    if cmd in ("ask", "fetch"):
+    if cmd == "threads":
+        from . import thread as thread_mod
+        convos = thread_mod.listing(sdir)
+        if not convos:
+            print("no conversations yet")
+            return 0
+        for t in convos:
+            mark = "closed " if t.closed else ""
+            last = t.turns[-1]["text"][:60] if t.turns else "(empty)"
+            print(f"{mark}{t.id}  {t.peer_name}  {len(t.turns)} turns  {last}")
+        return 0
+
+    if cmd in ("ask", "reply", "fetch"):
+        from . import thread as thread_mod
         from .ask import AskTooThin, validate
         from .envelope import ShareState, make_request, open_incoming
         transport = from_env(os.environ, identity=ident)
         if transport is None:
             print(_TRANSPORT_HINT)
             return 1
+
+        if cmd == "reply":
+            convo = thread_mod.load(sdir, args.thread)
+            if convo is None:
+                print(f"no conversation {args.thread!r} — see: session-recall share threads")
+                return 1
+            if convo.closed or convo.should_close():
+                print(f"conversation {convo.id} is closed — start a new ask")
+                return 1
+            peer = trust.get_by_address(convo.peer_address)
+            if peer is None:
+                print(f"{convo.peer_name} is no longer trusted")
+                return 1
+            text = " ".join(args.text).strip()
+            transport.post_mail(peer.address, make_request(
+                ident, peer, text, thread=convo.id))
+            convo.append("owner", text)
+            thread_mod.save(sdir, convo)
+            print(f"sent into {convo.id}; they approve before anything comes back")
+            return 0
+
         if cmd == "ask":
             peer = (trust.get_by_address(args.peer)
                     or next((p for p in trust.peers() if p.name == args.peer), None))
