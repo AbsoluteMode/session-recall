@@ -130,8 +130,31 @@ recall share allow <project> # пометить проект shareable (scope п
   лучше хранилища.
 - Криптография — только libsodium, ничего самодельного.
 
+## Деплой v1 (30.07.2026)
+
+Гейт реализован в PR #14 (вход), #15 (relay), #16 клетка воркера, #17 (апрув и
+отправка), #18 (relay слушает localhost).
+
+- **Relay:** `https://relay.terra-sandbox.ru` → nginx → `127.0.0.1:8787`, systemd-юнит
+  `session-recall-relay` под пользователем `srrelay`, данные в
+  `/var/lib/session-recall-relay`. Ставится из git (пакета на PyPI пока нет), значит
+  обновление кода = повторный `pip install` + `systemctl restart`.
+- **Домен — `terra-sandbox.ru`, а не `terra-flow.tech`**: зоной sandbox управляет
+  Cloudflare-токен из Doppler, а `terra-flow.tech` делегирован на reg.ru и правится
+  только руками. Запись **DNS-only, без CF-прокси**: пути запросов содержат адреса
+  ящиков, прокси бы их логировал — то же соображение, что и `access_log off`.
+- **Сертификат — существующий wildcard**, отдельный `certbot --nginx` для поддомена
+  запускать нельзя: он правит catch-all vhost `*.terra-sandbox.ru` и подменяет его
+  wildcard-серт одноимённым, ломая соседние сайты (поймано и откачено при деплое).
+- **Секреты** в Doppler `session-recall/dev`: `TG_APPROVAL_BOT_TOKEN`
+  (бот `@session_recall_approve_bot`), `SESSION_RECALL_RELAY_URL`.
+- Проверено вживую поверх боевого relay: pairing с совпадающим SAS → взаимный trust →
+  запрос Егора → кандидат воркера → отказ на неверной версии → `/ok` → подписанный
+  ответ, привязанный к нонсу исходного запроса.
+
 ---
 
 30.07.2026 · обсуждение: Claude app (зависшая сессия) → codex `019fa50c`, `019fae78`,
-`019fb3b7` → Claude Code (эта ветка). Реализации пока нет; при появлении кода точки
-входа получают якоря `// WHY: docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md`.
+`019fb3b7` → Claude Code (эта ветка) → реализация PR #14–#18 и деплой на Netcup.
+Точки входа в коде получают якоря
+`// WHY: docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md`.
