@@ -152,6 +152,58 @@ def test_status_lifecycle(world):
     assert load_candidate(sdir, c.id).status == "approved"
 
 
+def test_composer_writes_the_answer(world):
+    maxim, egor, trust, state, transport, sdir = world
+    transport.post_mail(maxim.address, make_request(
+        egor, maxim.public_bundle(), "как чинили CI?",
+        task="поднимаю relay", problem="ModuleNotFoundError fastmcp"))
+    seen = {}
+
+    def composer(req, chunks):
+        seen.update(req)
+        return "запинили mcp<2, смотри session-recall · 07876709"
+
+    cand = poll_once(maxim, trust, state, transport,
+                     lambda q, k: [_anchor("session-recall")], sdir,
+                     composer=composer)[0]
+    assert cand.composed is True
+    assert cand.text.startswith("запинили mcp<2")
+    assert seen["problem"] == "ModuleNotFoundError fastmcp"   # symptoms reach the model
+    assert cand.chunks, "provenance survives composing"
+
+
+def test_composer_failure_falls_back_to_digest(world):
+    maxim, egor, trust, state, transport, sdir = world
+    _ask(egor, maxim, transport)
+    cand = poll_once(maxim, trust, state, transport,
+                     lambda q, k: [_anchor("session-recall")], sdir,
+                     composer=lambda req, chunks: None)[0]
+    assert cand.composed is False
+    assert "how we fixed it" in cand.text
+
+
+def test_retrieval_query_includes_problem_and_task(world):
+    maxim, egor, trust, state, transport, sdir = world
+    transport.post_mail(maxim.address, make_request(
+        egor, maxim.public_bundle(), "как чинили?",
+        task="поднимаю relay", problem="ModuleNotFoundError fastmcp"))
+    queries = []
+    poll_once(maxim, trust, state, transport,
+              lambda q, k: queries.append(q) or [_anchor("session-recall")], sdir)
+    assert "ModuleNotFoundError fastmcp" in queries[0]
+    assert "поднимаю relay" in queries[0]
+
+
+def test_secret_in_composed_answer_still_flagged(world):
+    """The scanner runs on whatever text ships — composed or not."""
+    maxim, egor, trust, state, transport, sdir = world
+    _ask(egor, maxim, transport)
+    cand = poll_once(maxim, trust, state, transport,
+                     lambda q, k: [_anchor("session-recall")], sdir,
+                     composer=lambda req, chunks: "ключ был AKIAIOSFODNN7EXAMPLE")[0]
+    assert any(f["kind"] == "aws-access-key" for f in cand.findings)
+
+
 def test_question_length_capped(world):
     maxim, egor, trust, state, transport, sdir = world
     _ask(egor, maxim, transport, question="x" * 10000)

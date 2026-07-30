@@ -98,11 +98,12 @@ def _sealed(identity: Identity, peer_box_pk: str, kind: str, body: dict,
 
 
 def make_request(identity: Identity, peer: Peer | dict, question: str,
-                 task: str = "") -> bytes:
+                 task: str = "", problem: str = "") -> bytes:
     box_pk = peer.box_pk if isinstance(peer, Peer) else peer["box_pk"]
     address = peer.address if isinstance(peer, Peer) else peer["address"]
     return _sealed(identity, box_pk, "req",
-                   {"question": question, "task": task}, address, None)
+                   {"question": question, "task": task, "problem": problem},
+                   address, None)
 
 
 def make_response(identity: Identity, peer: Peer, text: str,

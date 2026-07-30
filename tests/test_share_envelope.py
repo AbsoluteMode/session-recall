@@ -33,7 +33,8 @@ def test_request_roundtrip(world):
     got = open_incoming(maxim, maxim_trust, state, raw)
     assert got is not None
     assert got.kind == "req"
-    assert got.body == {"question": "how did you fix the CI?", "task": "debug"}
+    assert got.body == {"question": "how did you fix the CI?", "task": "debug",
+                        "problem": ""}
     assert got.peer.name == "egor"
 
 

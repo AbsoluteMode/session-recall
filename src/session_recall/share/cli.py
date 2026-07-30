@@ -55,6 +55,12 @@ def add_parser(sub) -> None:
     nfp = ssub.add_parser("notify", help="run the full loop: worker + TG approval + send")
     nfp.add_argument("--once", action="store_true")
     nfp.add_argument("--interval", type=int, default=5)
+    akp = ssub.add_parser("ask", help="ask a trusted peer a question")
+    akp.add_argument("peer", help="peer name or address")
+    akp.add_argument("--doing", required=True, help="what you are working on")
+    akp.add_argument("--problem", required=True, help="what broke, with symptoms")
+    akp.add_argument("--want", required=True, help="what you want to know")
+    ssub.add_parser("fetch", help="collect answers peers have sent you")
     okp = ssub.add_parser("approve", help="approve a candidate locally (no TG)")
     okp.add_argument("id")
     okp.add_argument("version")
@@ -130,15 +136,18 @@ def run(args: argparse.Namespace) -> int:
         from ..rerank import make_reranker
         from ..retrieve import Recall
         from ..store import Store
+        from .compose import make_composer
         from .envelope import ShareState
         from .worker import poll_once
         store = Store(_config.DB_PATH)
         recall = Recall(store, make_embedder(), make_reranker())
         searcher = lambda q, k: recall.recall_search(q, k=k)
+        composer = make_composer()
         state = ShareState(sdir / "state.json")
         try:
             while True:
-                for cand in poll_once(ident, trust, state, transport, searcher, sdir):
+                for cand in poll_once(ident, trust, state, transport, searcher, sdir,
+                                      composer=composer):
                     flags = f"  ⚠ {len(cand.findings)} secret flag(s)" if cand.findings else ""
                     print(f"[{cand.id} v{cand.version}] {cand.peer_name}: "
                           f"{cand.question[:80]}{flags}\n"
@@ -176,6 +185,43 @@ def run(args: argparse.Namespace) -> int:
             for f in cand.findings:
                 print(f"  - {f['kind']}: {f['excerpt']}")
         print(f"\n--- candidate answer (v{cand.version}) ---\n{cand.text}")
+        return 0
+
+    if cmd in ("ask", "fetch"):
+        from .ask import AskTooThin, validate
+        from .envelope import ShareState, make_request, open_incoming
+        transport = from_env(os.environ, identity=ident)
+        if transport is None:
+            print(_TRANSPORT_HINT)
+            return 1
+        if cmd == "ask":
+            peer = (trust.get_by_address(args.peer)
+                    or next((p for p in trust.peers() if p.name == args.peer), None))
+            if peer is None:
+                print(f"no trusted peer {args.peer!r} — see: session-recall share devices")
+                return 1
+            try:
+                body = validate(args.doing, args.problem, args.want)
+            except AskTooThin as exc:
+                print(f"that request is too thin to answer:\n{exc}")
+                return 1
+            transport.post_mail(peer.address, make_request(
+                ident, peer, body["question"], task=body["task"],
+                problem=body["problem"]))
+            print(f"asked {peer.name}; they approve before anything comes back.\n"
+                  "collect answers with: session-recall share fetch")
+            return 0
+
+        state = ShareState(sdir / "state.json")
+        answers = 0
+        for raw in transport.fetch_mail(ident.address):
+            got = open_incoming(ident, trust, state, raw)
+            if got is None or got.kind != "resp":
+                continue          # requests are the answering service's business
+            answers += 1
+            print(f"--- answer from {got.peer.name} ---\n{got.body.get('text', '')}\n")
+        if not answers:
+            print("no answers waiting")
         return 0
 
     if cmd == "tg-setup":
@@ -249,11 +295,13 @@ def run(args: argparse.Namespace) -> int:
         from ..rerank import make_reranker
         from ..retrieve import Recall
         from ..store import Store
+        from .compose import make_composer
         store = Store(_config.DB_PATH)
         recall = Recall(store, make_embedder(), make_reranker())
         loop = NotifyLoop(TgApi(cfg.token), ident, trust,
                           ShareState(sdir / "state.json"), transport,
-                          lambda q, k: recall.recall_search(q, k=k), sdir, cfg)
+                          lambda q, k: recall.recall_search(q, k=k), sdir, cfg,
+                          composer=make_composer())
         try:
             if args.once:
                 stats = loop.tick()
