@@ -185,7 +185,10 @@ def make_handler(store: RelayStore):
     return Handler
 
 
-def serve(port: int, data_dir: Path) -> None:
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(RelayStore(data_dir)))
-    print(f"relay listening on :{port}, data in {data_dir}", flush=True)
+def serve(port: int, data_dir: Path, host: str = "127.0.0.1") -> None:
+    """Localhost by default: the relay speaks plain HTTP, so a public bind
+    would put addresses and blobs on the wire unencrypted. Production runs it
+    behind a TLS terminator; pass host explicitly to override."""
+    server = ThreadingHTTPServer((host, port), make_handler(RelayStore(data_dir)))
+    print(f"relay listening on {host}:{port}, data in {data_dir}", flush=True)
     server.serve_forever()
