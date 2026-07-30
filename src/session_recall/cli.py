@@ -95,7 +95,12 @@ def main(argv=None):
     pp = sub.add_parser("prune")  # drop rows for transcripts deleted from disk
     pp.add_argument("--source", choices=("claude", "codex"))
     sub.add_parser("health")  # is recall actually working right now?
+    from .share import cli as share_cli
+    share_cli.add_parser(sub)
     args = parser.parse_args(argv)
+
+    if args.cmd == "share":  # no Store: share state lives outside the index DB
+        return share_cli.run(args)
 
     store = Store(config.DB_PATH)
     if args.cmd == "health":
