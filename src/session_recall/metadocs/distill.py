@@ -17,7 +17,11 @@ import subprocess
 import tempfile
 from typing import Callable
 
-CLI_TIMEOUT_S = 300
+# Generous on purpose: a backfill batch asks the model to write several
+# complete documents from ~40K chars of dialogue, which measured well past
+# five minutes. This is an unattended nightly job — patience is free, and a
+# timeout only means the batch retries tomorrow.
+CLI_TIMEOUT_S = 900
 
 # distiller(project, dialogue_text, current_docs) -> {filename: new_content} | None
 Distiller = Callable[[str, str, dict], dict | None]

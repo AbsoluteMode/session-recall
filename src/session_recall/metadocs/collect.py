@@ -18,7 +18,9 @@ from .config import PROJECT_ALL, PROJECT_GIT, Watermarks
 # oldest-first until the budget is hit; the rest simply waits for the next run
 # (watermarks only advance over what was actually taken), so a giant day is
 # processed across several runs instead of overflowing one model call.
-BUDGET_CHARS = 60_000
+# 40K measured as the practical ceiling: distilling one batch into several
+# complete documents already takes minutes; bigger batches hit the timeout.
+BUDGET_CHARS = 40_000
 MAX_TURN_CHARS = 4_000     # one pasted log must not eat the whole budget
 
 
