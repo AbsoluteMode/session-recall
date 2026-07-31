@@ -112,7 +112,10 @@ def test_slot_ttl(server):
 
 
 def test_full_ceremony_and_request_over_http(server, users, tmp_path):
-    """The whole v1 loop over a live relay: pair, trust, ask, gate."""
+    """The whole v1 loop over a live relay: pair, trust, ask, gate. Both sides
+    enroll from their pending-peer files exactly as the CLI does, and the mail
+    travels over the pair's minted inbox — the identity address never appears
+    on the wire."""
     url, _ = server
     maxim, egor = users
     tm = HttpRelayTransport(url, identity=maxim)
@@ -124,15 +127,24 @@ def test_full_ceremony_and_request_over_http(server, users, tmp_path):
     completed = pairing.complete_invite(maxim, tm, mdir)
     assert joined.sas == completed.sas
 
-    maxim_trust = TrustStore(mdir / "trust.json")
-    b = joined.bundle  # egor trusts maxim's bundle; maxim trusts egor's
-    maxim_trust.add(Peer(name=completed.bundle["name"],
-                         address=completed.bundle["address"],
-                         sign_pk=completed.bundle["sign_pk"],
-                         box_pk=completed.bundle["box_pk"]))
+    def enroll(own_dir, petname):
+        pend = pairing.pending_peer(own_dir)
+        trust = TrustStore(own_dir / "trust.json")
+        bb = pend["bundle"]
+        trust.add(Peer(name=bb["name"], address=bb["address"],
+                       sign_pk=bb["sign_pk"], box_pk=bb["box_pk"],
+                       petname=petname,
+                       local_address=pend.get("local_address", "")))
+        return trust
 
-    te.post_mail(b["address"], make_request(egor, b, "how did you fix CI?"))
-    inbox = tm.fetch_mail(maxim.address)
+    maxim_trust, egor_trust = enroll(mdir, "egor"), enroll(edir, "maxim")
+
+    peer_maxim = egor_trust.peers()[0]     # egor's record of maxim
+    te.post_mail(peer_maxim.address,
+                 make_request(egor, peer_maxim, "how did you fix CI?"))
+    pair_inbox = maxim_trust.peers()[0].local_address
+    assert pair_inbox == peer_maxim.address != maxim.address  # the pair's island
+    inbox = tm.fetch_mail(pair_inbox)
     assert len(inbox) == 1
     got = open_incoming(maxim, maxim_trust, ShareState(mdir / "state.json"), inbox[0])
     assert got is not None and got.body["question"] == "how did you fix CI?"

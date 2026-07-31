@@ -30,13 +30,22 @@ def add_parser(sub) -> None:
     jp = ssub.add_parser("join", help="accept an invite code from a peer")
     jp.add_argument("code")
     ssub.add_parser("complete", help="finish pairing after the peer joined")
-    ssub.add_parser("trust", help="confirm the SAS matched; enroll the peer")
+    tp = ssub.add_parser("trust",
+                         help="confirm the SAS matched; enroll the peer under "
+                              "a name YOU choose")
+    tp.add_argument("petname", nargs="?",
+                    help="what you will call them — unique, yours, required")
     ssub.add_parser("devices", help="list trusted peers")
-    rp = ssub.add_parser("revoke", help="revoke a peer by name or address")
+    rp = ssub.add_parser("revoke", help="revoke a peer by petname or address")
     rp.add_argument("peer")
-    ap = ssub.add_parser("allow", help="mark a project shareable (no arg: list)")
+    ap = ssub.add_parser("allow",
+                         help="grant a contact access to a project (no arg: list)")
     ap.add_argument("project", nargs="?")
+    ap.add_argument("--to", dest="to", default=None, metavar="PETNAME",
+                    help="which contact; `--to all` opens it to every contact")
     ap.add_argument("--remove", action="store_true")
+    ssub.add_parser("pause", help="stop answering (questions wait at the relay)")
+    ssub.add_parser("resume", help="resume answering after a pause")
     rlp = ssub.add_parser("relay", help="run the relay server (blind blob store)")
     rlp.add_argument("--port", type=int, default=8787)
     rlp.add_argument("--host", default="127.0.0.1",
@@ -233,8 +242,7 @@ def run(args: argparse.Namespace) -> int:
             return 0
 
         if cmd == "ask":
-            peer = (trust.get_by_address(args.peer)
-                    or next((p for p in trust.peers() if p.name == args.peer), None))
+            peer = trust.get(args.peer)
             if peer is None:
                 print(f"no trusted peer {args.peer!r} — see: session-recall share devices")
                 return 1
@@ -252,12 +260,14 @@ def run(args: argparse.Namespace) -> int:
 
         state = ShareState(sdir / "state.json")
         answers = 0
-        for raw in transport.fetch_mail(ident.address):
-            got = open_incoming(ident, trust, state, raw)
-            if got is None or got.kind != "resp":
-                continue          # requests are the answering service's business
-            answers += 1
-            print(f"--- answer from {got.peer.name} ---\n{got.body.get('text', '')}\n")
+        for inbox in trust.inbox_addresses(ident):
+            for raw in transport.fetch_mail(inbox):
+                got = open_incoming(ident, trust, state, raw)
+                if got is None or got.kind != "resp":
+                    continue      # requests are the answering service's business
+                answers += 1
+                print(f"--- answer from {got.peer.label} ---\n"
+                      f"{got.body.get('text', '')}\n")
         if not answers:
             print("no answers waiting")
         return 0
@@ -357,16 +367,28 @@ def run(args: argparse.Namespace) -> int:
             print("nothing to trust — finish a pairing (join/complete) first")
             return 1
         b = cand["bundle"]
+        # The petname is the owner's word against impersonation: the bundle's
+        # name is whatever the peer typed, so the name everything else refers
+        # to must be chosen HERE, by the human, at enrollment.
+        petname = (args.petname or "").strip()
+        if not petname:
+            print(f'they introduce themselves as {b["name"]!r} — that is their '
+                  "text, not a fact.\nenroll them under a name you choose: "
+                  "session-recall share trust <petname>")
+            return 1
         try:
             trust.add(Peer(name=b["name"], address=b["address"],
-                           sign_pk=b["sign_pk"], box_pk=b["box_pk"]))
+                           sign_pk=b["sign_pk"], box_pk=b["box_pk"],
+                           petname=petname,
+                           local_address=cand.get("local_address", "")))
         except ValueError as exc:
             print(exc)
             return 1
         pairing.clear_pending_peer(sdir)
-        print(f"trusted: {b['name']} ({b['address']}), mode=accept\n"
-              "they can ask you questions once the answering service ships; "
-              "revoke anytime: session-recall share revoke " + b["name"])
+        print(f"trusted: {petname} (introduces as {b['name']!r}), mode=accept\n"
+              f"they see nothing until you grant scope: "
+              f"session-recall share allow <project> --to {petname}\n"
+              f"revoke anytime: session-recall share revoke {petname}")
         return 0
 
     if cmd == "devices":
@@ -376,7 +398,9 @@ def run(args: argparse.Namespace) -> int:
             return 0
         for p in peers:
             mark = "REVOKED " if p.revoked else ""
-            print(f"{mark}{p.name}  {p.address}  mode={p.mode}")
+            scope = ", ".join(trust.projects_for(p)) or "(no scope — sees nothing)"
+            claimed = f' "{p.name}"' if p.name != p.label else ""
+            print(f"{mark}{p.label}{claimed}  {p.address}  mode={p.mode}  {scope}")
         return 0
 
     if cmd == "revoke":
@@ -384,22 +408,46 @@ def run(args: argparse.Namespace) -> int:
         if peer is None:
             print(f"no active peer matching {args.peer!r}")
             return 1
-        print(f"revoked: {peer.name} ({peer.address}) — their envelopes now drop silently")
+        print(f"revoked: {peer.label} ({peer.address}) — their channel is dead: "
+              "we stop reading their inbox and their envelopes drop silently")
+        return 0
+
+    if cmd in ("pause", "resume"):
+        trust.set_paused(cmd == "pause")
+        print("paused — nothing is read or answered; questions wait at the relay"
+              if cmd == "pause" else "resumed — answering again")
         return 0
 
     if cmd == "allow":
         if args.project is None:
-            allowed = trust.allowed_projects()
-            print("\n".join(allowed) if allowed else
-                  "no shareable projects (default deny) — add one: "
-                  "session-recall share allow <project>")
+            lines = [f"all contacts: {p}" for p in trust.allowed_projects()]
+            for peer in trust.peers():
+                lines += [f"{peer.label}: {p}" for p in peer.projects]
+            print("\n".join(lines) if lines else
+                  "no grants (default deny) — every answer comes back empty.\n"
+                  "grant one: session-recall share allow <project> --to <petname>")
             return 0
+        # Granting requires saying WHO. `--to all` is the everyone-bucket and
+        # has to be typed out — opening a project to all contacts must never be
+        # the accident of forgetting a flag.
+        if args.to is None:
+            print("say who: session-recall share allow "
+                  f"{args.project} --to <petname>   (or --to all)")
+            return 1
+        peer = None
+        if args.to != "all":
+            peer = trust.get(args.to)
+            if peer is None:
+                print(f"no trusted peer {args.to!r} — see: session-recall share devices")
+                return 1
         if args.remove:
-            trust.disallow_project(args.project)
-            print(f"no longer shareable: {args.project}")
+            trust.disallow_project(args.project, peer)
+            print(f"removed: {args.project} from "
+                  f"{'all contacts' if peer is None else peer.label}")
         else:
-            trust.allow_project(args.project)
-            print(f"shareable: {args.project}")
+            trust.allow_project(args.project, peer)
+            print(f"{peer.label if peer else 'every contact'} may now see: "
+                  f"{args.project}")
         return 0
 
     return 1

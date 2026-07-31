@@ -45,10 +45,15 @@ class Identity:
     def box_pk_b64(self) -> str:
         return b64(bytes(self.box_key.public_key))
 
-    def public_bundle(self) -> dict:
+    def public_bundle(self, address: str | None = None) -> dict:
         """What the other side learns about us during pairing. Public keys and a
-        self-chosen name only — nothing here is sensitive."""
-        return {"name": self.name, "address": self.address,
+        self-chosen name only — nothing here is sensitive.
+
+        `address` is the inbox minted for this one peer (see trust.Peer). Each
+        pairing hands out a different one, so no contact learns an address any
+        other contact knows, and the relay sees unrelated islands instead of a
+        social graph. Omitted only where there is no pair yet."""
+        return {"name": self.name, "address": address or self.address,
                 "sign_pk": self.sign_pk_b64, "box_pk": self.box_pk_b64}
 
 

@@ -32,22 +32,27 @@ def test_full_ceremony(homes, capsys):
     assert _run(["share", "init", "egor"]) == 0
     assert _run(["share", "join", code]) == 0
     sas_egor = capsys.readouterr().out
-    assert _run(["share", "trust"]) == 0
+    # enrolling without choosing a name must not work — the bundle's name is
+    # the peer's own claim
+    assert _run(["share", "trust"]) == 1
+    assert "name you choose" in capsys.readouterr().out
+    assert _run(["share", "trust", "maxim-lead"]) == 0
 
     homes("maxim")
     assert _run(["share", "complete"]) == 0
     sas_maxim = capsys.readouterr().out
-    assert _run(["share", "trust"]) == 0
+    assert _run(["share", "trust", "egor-work"]) == 0
 
     sas = [l for l in sas_egor.splitlines() if "SAS code:" in l]
     assert sas and sas == [l for l in sas_maxim.splitlines() if "SAS code:" in l]
 
     assert _run(["share", "devices"]) == 0
-    assert "egor" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "egor-work" in out and '"egor"' in out   # petname + their claim
 
     homes("egor")
     assert _run(["share", "devices"]) == 0
-    assert "maxim" in capsys.readouterr().out
+    assert "maxim-lead" in capsys.readouterr().out
 
 
 def test_join_with_bad_code_fails_cleanly(homes, capsys):
@@ -60,7 +65,7 @@ def test_join_with_bad_code_fails_cleanly(homes, capsys):
 def test_trust_requires_pairing(homes, capsys):
     homes("maxim")
     _run(["share", "init", "maxim"])
-    assert _run(["share", "trust"]) == 1
+    assert _run(["share", "trust", "egor"]) == 1
     assert "nothing to trust" in capsys.readouterr().out
 
 
@@ -70,12 +75,26 @@ def test_revoke_and_allow(homes, capsys):
 
     assert _run(["share", "allow"]) == 0
     assert "default deny" in capsys.readouterr().out
-    assert _run(["share", "allow", "session-recall"]) == 0
+    # granting without saying who must not work — opening a project to every
+    # contact has to be typed out, never the accident of a forgotten flag
+    assert _run(["share", "allow", "session-recall"]) == 1
+    assert "say who" in capsys.readouterr().out
+    assert _run(["share", "allow", "session-recall", "--to", "all"]) == 0
     assert _run(["share", "allow"]) == 0
     assert "session-recall" in capsys.readouterr().out
-    assert _run(["share", "allow", "session-recall", "--remove"]) == 0
+    assert _run(["share", "allow", "session-recall", "--to", "all", "--remove"]) == 0
+    assert _run(["share", "allow", "x", "--to", "ghost"]) == 1  # unknown contact
 
     assert _run(["share", "revoke", "nobody"]) == 1
+
+
+def test_pause_and_resume(homes, capsys):
+    homes("maxim")
+    _run(["share", "init", "maxim"])
+    assert _run(["share", "pause"]) == 0
+    assert "paused" in capsys.readouterr().out
+    assert _run(["share", "resume"]) == 0
+    assert "resumed" in capsys.readouterr().out
 
 
 def test_commands_without_identity_point_to_init(homes, capsys):

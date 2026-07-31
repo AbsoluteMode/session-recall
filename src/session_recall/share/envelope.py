@@ -82,11 +82,12 @@ class Incoming:
 
 
 def _sealed(identity: Identity, peer_box_pk: str, kind: str, body: dict,
-            to_address: str, in_reply_to: str | None) -> bytes:
+            to_address: str, in_reply_to: str | None,
+            from_address: str = "") -> bytes:
     box = Box(identity.box_key, PublicKey(unb64(peer_box_pk)))
     envelope = {
         "v": 1, "kind": kind,
-        "from": identity.address, "to": to_address,
+        "from": from_address or identity.address, "to": to_address,
         "ts": time.time(), "nonce": b64(os.urandom(16)),
         "ct": b64(box.encrypt(canonical(body))),
     }
@@ -97,16 +98,24 @@ def _sealed(identity: Identity, peer_box_pk: str, kind: str, body: dict,
     return json.dumps(envelope).encode()
 
 
+def _pair_addresses(peer: Peer | dict) -> tuple[str, str]:
+    """(their inbox, our inbox for them). Both are minted per pairing, so the
+    two addresses on the wire mean nothing outside this one relationship."""
+    if isinstance(peer, Peer):
+        return peer.address, peer.local_address
+    return peer.get("address", ""), peer.get("local_address", "")
+
+
 def make_request(identity: Identity, peer: Peer | dict, question: str,
                  task: str = "", problem: str = "", thread: str = "") -> bytes:
     """`thread` rides inside the encrypted body on purpose: the relay must not
     learn which envelopes belong to the same conversation."""
     box_pk = peer.box_pk if isinstance(peer, Peer) else peer["box_pk"]
-    address = peer.address if isinstance(peer, Peer) else peer["address"]
+    to_address, from_address = _pair_addresses(peer)
     return _sealed(identity, box_pk, "req",
                    {"question": question, "task": task, "problem": problem,
                     "thread": thread},
-                   address, None)
+                   to_address, None, from_address)
 
 
 def make_response(identity: Identity, peer: Peer, text: str,
@@ -116,9 +125,10 @@ def make_response(identity: Identity, peer: Peer, text: str,
     many fragments it rests on, so the asker can tell a grounded answer from a
     guess. Session ids and project names stay home: the asker could not read
     them anyway, and they are exactly the metadata worth not leaking."""
+    to_address, from_address = _pair_addresses(peer)
     return _sealed(identity, peer.box_pk, "resp",
                    {"text": text, "thread": thread, "sources": sources},
-                   peer.address, in_reply_to)
+                   to_address, in_reply_to, from_address)
 
 
 def open_incoming(identity: Identity, trust: TrustStore, state: ShareState,
@@ -135,11 +145,14 @@ def open_incoming(identity: Identity, trust: TrustStore, state: ShareState,
         return None
     if env.get("kind") not in ("req", "resp"):
         return None
-    if env.get("to") != identity.address:
-        return None
 
     peer = trust.get_by_address(env.get("from", ""))
     if peer is None:                      # unknown or revoked → same silence
+        return None
+    # Each pairing minted this peer their own inbox on our side; an envelope
+    # from them must land exactly there. Cross-inbox delivery would mean a
+    # replayed or misrouted blob even if the crypto checks out.
+    if env.get("to") != (peer.local_address or identity.address):
         return None
     sig = env.pop("sig", None)
     if not sig:
