@@ -103,9 +103,12 @@ def test_commands_without_identity_point_to_init(homes, capsys):
     assert "share init" in capsys.readouterr().out
 
 
-def test_no_transport_hint(homes, capsys, monkeypatch):
+def test_transport_opt_out_hint(homes, capsys, monkeypatch):
+    """With a built-in default relay the only path to "no transport" is the
+    explicit opt-out — and it must say how to get back."""
     monkeypatch.delenv("SESSION_RECALL_SHARE_TRANSPORT_DIR", raising=False)
+    monkeypatch.setenv("SESSION_RECALL_RELAY_URL", "none")
     homes("maxim")
     _run(["share", "init", "maxim"])
     assert _run(["share", "invite"]) == 1
-    assert "no transport configured" in capsys.readouterr().out
+    assert "transport disabled" in capsys.readouterr().out

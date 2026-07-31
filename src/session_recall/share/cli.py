@@ -17,8 +17,9 @@ from .transport import from_env
 from .trust import Peer, TrustStore
 
 _TRANSPORT_HINT = (
-    "no transport configured: set SESSION_RECALL_RELAY_URL (relay) or "
-    "SESSION_RECALL_SHARE_TRANSPORT_DIR (shared folder)")
+    "transport disabled (SESSION_RECALL_RELAY_URL=none) — unset it to use the "
+    "default relay, set it to your own relay, or set "
+    "SESSION_RECALL_SHARE_TRANSPORT_DIR for a shared folder")
 
 
 def add_parser(sub) -> None:
