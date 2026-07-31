@@ -20,7 +20,7 @@ from nacl.exceptions import CryptoError
 from nacl.secret import SecretBox
 from nacl.utils import random as nacl_random
 
-from .crypto import b32, unb32, b64, unb64, canonical, sas_code, group
+from .crypto import b32, unb32, b64, unb64, canonical, new_address, sas_code, group
 from .identity import Identity
 
 INVITE_TTL_S = 600
@@ -57,12 +57,20 @@ def _open(key: bytes, blob: bytes, ttl_s: float = INVITE_TTL_S) -> dict:
 
 
 def start_invite(identity: Identity, transport, share_dir: Path) -> str:
-    """Returns the code to hand over out-of-band (chat, voice, paper)."""
+    """Returns the code to hand over out-of-band (chat, voice, paper).
+
+    The invite mints a fresh inbox address for whoever answers it, so this
+    ten-minute window is also where the pair's private channel is born: the code
+    is what the first joiner spends, and the address they get back is known to
+    them alone."""
     invite_id = nacl_random(_ID_LEN)
     key = nacl_random(_KEY_LEN)
-    transport.put_slot(f"pair-a-{b32(invite_id)}", _seal(key, identity.public_bundle()))
+    local = new_address()
+    transport.put_slot(f"pair-a-{b32(invite_id)}",
+                       _seal(key, identity.public_bundle(local)))
     (share_dir / PENDING_INVITE_FILE).write_text(json.dumps(
-        {"invite_id": b32(invite_id), "key": b64(key), "created_at": time.time()}))
+        {"invite_id": b32(invite_id), "key": b64(key), "local_address": local,
+         "created_at": time.time()}))
     return group(b32(invite_id + key))
 
 
@@ -75,8 +83,10 @@ def join(identity: Identity, transport, share_dir: Path, code: str) -> PairingRe
     if blob is None:
         raise PairingError("invite not found — expired, already used, or wrong code")
     their = _open(key, blob)
-    transport.put_slot(f"pair-b-{invite_id}", _seal(key, identity.public_bundle()))
-    return _finish(identity, share_dir, their)
+    local = new_address()
+    transport.put_slot(f"pair-b-{invite_id}",
+                       _seal(key, identity.public_bundle(local)))
+    return _finish(identity, share_dir, their, local)
 
 
 def complete_invite(identity: Identity, transport, share_dir: Path) -> PairingResult:
@@ -92,15 +102,17 @@ def complete_invite(identity: Identity, transport, share_dir: Path) -> PairingRe
         raise PairingError("the other side has not joined yet")
     their = _open(unb64(pending["key"]), blob)
     pending_path.unlink()
-    return _finish(identity, share_dir, their)
+    return _finish(identity, share_dir, their, pending.get("local_address", ""))
 
 
-def _finish(identity: Identity, share_dir: Path, their: dict) -> PairingResult:
+def _finish(identity: Identity, share_dir: Path, their: dict,
+            local_address: str = "") -> PairingResult:
     sas = sas_code(unb64(identity.sign_pk_b64), unb64(their["sign_pk"]))
     # Parked until the human confirms the SAS and runs `share trust` — pairing
     # never writes the trust store itself.
     (share_dir / PENDING_PEER_FILE).write_text(json.dumps(
-        {"bundle": their, "sas": sas, "ts": time.time()}))
+        {"bundle": their, "sas": sas, "local_address": local_address,
+         "ts": time.time()}))
     return PairingResult(bundle=their, sas=sas)
 
 

@@ -8,8 +8,9 @@ path could still only shape TEXT that lands in front of the owner. Sending is
 the send process's job after `/ok` (next PR); default-deny is structural.
 
 Two more gate invariants live here:
-- scope: only anchors from `share allow`-ed projects may enter a candidate
-  (default deny — empty allow-list means every answer comes back empty);
+- scope: only anchors from projects THIS peer may see enter a candidate
+  (their own grants plus the `--to all` bucket; default deny — no grants
+  means every answer comes back empty);
 - the worker leaves no transcripts, so nothing it processes can re-enter the
   index and become a stored injection later.
 
@@ -111,7 +112,7 @@ def build_candidate(incoming: Incoming, searcher: Searcher,
 
     composed = False
     if not chunks:
-        text = ("(nothing found within shareable scope — "
+        text = ("(nothing found within what this contact may see — "
                 "see `session-recall share allow`)")
     else:
         written = composer(body, chunks, turns) if composer else None
@@ -129,7 +130,7 @@ def build_candidate(incoming: Incoming, searcher: Searcher,
                 findings.append({**asdict(f), "in": "source"})
 
     cand = Candidate(
-        id=secrets.token_hex(4), peer_name=incoming.peer.name,
+        id=secrets.token_hex(4), peer_name=incoming.peer.label,
         peer_address=incoming.peer.address, question=body["question"],
         task=body["task"], problem=body["problem"],
         reply_nonce=incoming.nonce, created_at=time.time(), text=text,
@@ -142,27 +143,37 @@ def build_candidate(incoming: Incoming, searcher: Searcher,
 def poll_once(identity: Identity, trust: TrustStore, state: ShareState,
               transport, searcher: Searcher, share_dir: Path,
               composer=None) -> list[Candidate]:
-    """One inbox sweep. Invalid envelopes vanish inside open_incoming (silent
-    drop); valid requests become pending candidates on disk."""
+    """One sweep over every inbox we listen on (one per pairing plus the
+    legacy identity address). Invalid envelopes vanish inside open_incoming
+    (silent drop); valid requests become pending candidates on disk.
+
+    Paused means paused *before* the fetch: consuming mail is destructive, so a
+    paused owner leaves questions parked in the relay (its TTL applies) instead
+    of eating and dropping them."""
+    if trust.paused:
+        return []
     out = []
-    for raw in transport.fetch_mail(identity.address):
-        incoming = open_incoming(identity, trust, state, raw)
-        if incoming is None or incoming.kind != "req":
-            continue
-        thread_id = str(incoming.body.get("thread", ""))[:32] or thread_mod.new_id()
-        convo = thread_mod.open_or_create(share_dir, thread_id,
-                                          incoming.peer.address, incoming.peer.name)
-        if convo.closed or convo.should_close():
-            convo.closed = True          # a thread this old is a standing channel
+    for inbox in trust.inbox_addresses(identity):
+        for raw in transport.fetch_mail(inbox):
+            incoming = open_incoming(identity, trust, state, raw)
+            if incoming is None or incoming.kind != "req":
+                continue
+            thread_id = str(incoming.body.get("thread", ""))[:32] or thread_mod.new_id()
+            convo = thread_mod.open_or_create(share_dir, thread_id,
+                                              incoming.peer.address,
+                                              incoming.peer.label)
+            if convo.closed or convo.should_close():
+                convo.closed = True      # a thread this old is a standing channel
+                thread_mod.save(share_dir, convo)
+                continue
+            cand = build_candidate(incoming, searcher,
+                                   trust.projects_for(incoming.peer),
+                                   composer=composer, turns=convo.context())
+            cand.thread = thread_id
+            convo.append("peer", cand.question, kind="question")
             thread_mod.save(share_dir, convo)
-            continue
-        cand = build_candidate(incoming, searcher, trust.allowed_projects(),
-                               composer=composer, turns=convo.context())
-        cand.thread = thread_id
-        convo.append("peer", cand.question, kind="question")
-        thread_mod.save(share_dir, convo)
-        _write_candidate(share_dir, cand)
-        out.append(cand)
+            _write_candidate(share_dir, cand)
+            out.append(cand)
     return out
 
 
