@@ -100,6 +100,18 @@ def test_select_projects_git_probes_cwd(db, marks):
     assert collect.select_projects(db, ["no-git"]) == ["no-git"]
 
 
+def test_select_projects_skips_uuid_junk(db, marks):
+    """A bare-UUID "project" is a session with an odd cwd, not a codebase —
+    all/git never distill it; only naming it explicitly does."""
+    junk = "bcb3fb67-e6e9-4d51-af40-83fdd5986ff9"
+    add_turn(db, junk, "user", "x", 1, cwd="/tmp/x")
+    add_turn(db, "real", "user", "x", 1, cwd="/tmp/real")
+    assert collect.select_projects(db, [PROJECT_ALL]) == ["real"]
+    assert collect.select_projects(db, [PROJECT_GIT],
+                                   is_git=lambda c: True) == ["real"]
+    assert collect.select_projects(db, [junk]) == [junk]
+
+
 # -- distill output protocol --------------------------------------------------
 def test_parse_file_blocks():
     raw = ("=== FILE: bugs.md ===\n# Bugs\n- one\n"
