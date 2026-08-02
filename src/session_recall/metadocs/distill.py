@@ -36,7 +36,8 @@ _NO_CHANGES = "=== NO CHANGES ==="
 _SYSTEM = """\
 You maintain a project's living memory: a few markdown documents distilled \
 from what was said in work sessions. You receive the current documents and the \
-new dialogue since the last run. Return updated documents.
+new dialogue of ONE work session (or one chapter of a long session). Return \
+updated documents.
 
 Track exactly these entities:
 

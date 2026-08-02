@@ -53,33 +53,41 @@ def repo(tmp_path):
 def test_collect_only_dialogue_roles(db, marks):
     add_turn(db, "p", "user", "как чинили CI?", 100)
     add_turn(db, "p", "assistant", "запинили mcp<2", 101)
-    batch = collect.new_dialogue(db, "p", marks)
-    assert [t["role"] for t in batch.turns] == ["user", "assistant"]
+    (upd,) = collect.pending_sessions(db, "p", marks)
+    assert [t["role"] for t in upd.turns] == ["user", "assistant"]
 
 
-def test_collect_respects_watermark(db, marks):
+def test_collect_session_tail_after_watermark(db, marks):
+    """«Обновления по сессии»: an appended session contributes only its tail."""
     add_turn(db, "p", "user", "old", 100)
     add_turn(db, "p", "user", "new", 200)
     marks.advance("claude", "sess-1", 100)
-    batch = collect.new_dialogue(db, "p", marks)
-    assert [t["text"] for t in batch.turns] == ["new"]
+    (upd,) = collect.pending_sessions(db, "p", marks)
+    assert [t["text"] for t in upd.turns] == ["new"]
 
 
 def test_collect_late_indexed_session_still_taken(db, marks):
     """An OLD session indexed for the first time has no mark → taken whole."""
     marks.advance("claude", "sess-1", 500)
     add_turn(db, "p", "user", "ancient but never distilled", 100, sid="sess-2")
-    batch = collect.new_dialogue(db, "p", marks)
-    assert len(batch.turns) == 1
+    (upd,) = collect.pending_sessions(db, "p", marks)
+    assert upd.session_id == "sess-2" and len(upd.turns) == 1
 
 
-def test_collect_budget_takes_whole_sessions(db, marks, monkeypatch):
-    monkeypatch.setattr(collect, "BUDGET_CHARS", 100)
-    add_turn(db, "p", "user", "a" * 80, 100, sid="s1")
-    add_turn(db, "p", "user", "b" * 80, 200, sid="s2")
-    batch = collect.new_dialogue(db, "p", marks)
-    assert batch.spillover is True
-    assert {t["session_id"] for t in batch.turns} == {"s1"}  # s2 waits, whole
+def test_collect_sessions_ordered_oldest_first(db, marks):
+    add_turn(db, "p", "user", "later story", 300, sid="s2")
+    add_turn(db, "p", "user", "earlier story", 100, sid="s1")
+    got = collect.pending_sessions(db, "p", marks)
+    assert [u.session_id for u in got] == ["s1", "s2"]
+
+
+def test_chapters_split_only_marathon_sessions():
+    small = [{"text": "x" * 10, "ts": i} for i in range(3)]
+    assert len(collect.chapters(small, ceiling=100)) == 1
+    big = [{"text": "x" * 40, "ts": i} for i in range(5)]
+    parts = collect.chapters(big, ceiling=100)
+    assert len(parts) == 3                     # 2+2+1, order preserved
+    assert [t["ts"] for p in parts for t in p] == [0, 1, 2, 3, 4]
 
 
 def test_select_projects_git_probes_cwd(db, marks):
@@ -166,18 +174,16 @@ def test_commit_only_on_change(repo):
 
 
 # -- the whole run ------------------------------------------------------------
-def _world(db, tmp_path, repo):
+def _world(db, tmp_path, repo, monkeypatch):
+    monkeypatch.setattr("session_recall.metadocs.run.state_path",
+                        lambda d=None: tmp_path / "st.json")
     add_turn(db, "proj", "user", "почему выбрали пин mcp<2?", 100)
     add_turn(db, "proj", "assistant", "потому что 2.0 удалил fastmcp, PR #13", 101)
     return MetaConfig(repo=str(repo), projects=[PROJECT_ALL])
 
 
 def test_run_distills_writes_commits_advances(db, tmp_path, repo, monkeypatch):
-    monkeypatch.setattr("session_recall.metadocs.config.state_path",
-                        lambda d=None: tmp_path / "st.json")
-    monkeypatch.setattr("session_recall.metadocs.run.state_path",
-                        lambda d=None: tmp_path / "st.json")
-    cfg = _world(db, tmp_path, repo)
+    cfg = _world(db, tmp_path, repo, monkeypatch)
     calls = []
 
     def distiller(project, turns, docs):
@@ -185,32 +191,70 @@ def test_run_distills_writes_commits_advances(db, tmp_path, repo, monkeypatch):
         return {"decisions.md": "## пин mcp<2\nпочему: fastmcp удалили. sources: sess-1\n"}
 
     report = run_once(cfg, db, distiller)
-    assert calls == [("proj", 2)]
-    assert report.committed
+    assert calls == [("proj", 2)]           # one session → one call
+    assert report.commits and report.commits[0][0] == "proj"
+    assert report.projects == [("proj", 1, 1, "")]
     assert (repo / "proj" / "decisions.md").exists()
     # second run: watermark advanced, nothing new, no commit
     report2 = run_once(cfg, db, distiller)
-    assert report2.committed == "" and len(calls) == 1
+    assert report2.commits == [] and len(calls) == 1
 
 
-def test_run_failed_distill_does_not_advance(db, tmp_path, repo, monkeypatch):
-    monkeypatch.setattr("session_recall.metadocs.run.state_path",
-                        lambda d=None: tmp_path / "st.json")
-    cfg = _world(db, tmp_path, repo)
-    report = run_once(cfg, db, lambda p, t, d: None)
-    assert report.committed == ""
+def test_run_one_call_per_session(db, tmp_path, repo, monkeypatch):
+    cfg = _world(db, tmp_path, repo, monkeypatch)
+    add_turn(db, "proj", "user", "другая история", 300, sid="sess-2")
+    seen = []
+    distiller = lambda p, t, d: seen.append({x["session_id"] for x in t}) or {}
+    report = run_once(cfg, db, distiller)
+    assert seen == [{"sess-1"}, {"sess-2"}]  # never mixed in one call
+    assert report.projects == [("proj", 2, 2, "")]
+
+
+def test_run_marathon_session_processed_in_chapters(db, tmp_path, repo, monkeypatch):
+    cfg = _world(db, tmp_path, repo, monkeypatch)
+    monkeypatch.setattr(collect, "MAX_CALL_CHARS", 50)
+    add_turn(db, "proj", "user", "x" * 40, 102)
+    add_turn(db, "proj", "user", "y" * 40, 103)
+    calls = []
+    distiller = lambda p, t, d: calls.append(len(t)) or {}
+    report = run_once(cfg, db, distiller)
+    assert len(calls) >= 2                   # split, but all of it processed
+    assert report.projects == [("proj", 1, 1, "")]
     marks = Watermarks(tmp_path / "st.json")
-    assert marks.last_ts("claude", "sess-1") == 0     # retry next run
+    assert marks.last_ts("claude", "sess-1") == 103
+
+
+def test_run_failed_session_halts_project_in_order(db, tmp_path, repo, monkeypatch):
+    """Later sessions build on earlier stories: a failure stops the project so
+    nothing is distilled out of order, and the watermark stays put."""
+    cfg = _world(db, tmp_path, repo, monkeypatch)
+    add_turn(db, "proj", "user", "продолжение истории", 300, sid="sess-2")
+    report = run_once(cfg, db, lambda p, t, d: None)
+    assert report.commits == []
+    assert report.projects == [("proj", 0, 2, "distill failed, will retry")]
+    marks = Watermarks(tmp_path / "st.json")
+    assert marks.last_ts("claude", "sess-1") == 0
+    assert marks.last_ts("claude", "sess-2") == 0    # never attempted
 
 
 def test_run_scanner_block_freezes_watermark(db, tmp_path, repo, monkeypatch):
-    monkeypatch.setattr("session_recall.metadocs.run.state_path",
-                        lambda d=None: tmp_path / "st.json")
-    cfg = _world(db, tmp_path, repo)
+    cfg = _world(db, tmp_path, repo, monkeypatch)
     leaky = {"bugs.md": "fix used AKIAIOSFODNN7EXAMPLE\n"}
     report = run_once(cfg, db, lambda p, t, d: leaky)
     assert report.blocked
     assert Watermarks(tmp_path / "st.json").last_ts("claude", "sess-1") == 0
+
+
+def test_run_commit_per_project(db, tmp_path, repo, monkeypatch):
+    cfg = _world(db, tmp_path, repo, monkeypatch)
+    add_turn(db, "other", "user", "второй проект", 100, sid="sess-9")
+    distiller = lambda p, t, d: {"bugs.md": f"# {p}\n"}
+    report = run_once(cfg, db, distiller)
+    assert [c[0] for c in report.commits] == ["other", "proj"]
+    log = subprocess.run(["git", "-C", str(repo), "log", "--format=%s"],
+                         capture_output=True, text=True).stdout
+    assert "meta docs: other — 1 session(s)" in log
+    assert "meta docs: proj — 1 session(s)" in log
 
 
 # -- schedule -----------------------------------------------------------------

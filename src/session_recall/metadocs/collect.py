@@ -1,4 +1,13 @@
-"""Pull the new dialogue out of the index — user words and final answers only.
+"""Pull the new dialogue out of the index — user words and final answers only,
+handed over SESSION BY SESSION.
+
+The session is the unit of work on purpose: one session is one work arc (a bug
+hunt, a feature, a decision), and the per-session watermark makes it the
+natural increment — a run gives the distiller each session's unseen tail,
+oldest session first, until nothing is pending. There is no run-level budget:
+runs take as long as the backlog demands. The only size threshold lives at the
+level of ONE model call — a marathon session is split into sequential chapters,
+because a single call has practical limits even though the run does not.
 
 Reads the existing index DB directly and read-only: the indexer already stores
 exactly the surface layer meta docs wants (``user`` messages and the
@@ -14,25 +23,16 @@ from pathlib import Path
 
 from .config import PROJECT_ALL, PROJECT_GIT, Watermarks
 
-# One run reads at most this much text per project. Whole sessions are taken
-# oldest-first until the budget is hit; the rest simply waits for the next run
-# (watermarks only advance over what was actually taken), so a giant day is
-# processed across several runs instead of overflowing one model call.
-# 40K measured as the practical ceiling: distilling one batch into several
-# complete documents already takes minutes; bigger batches hit the timeout.
-BUDGET_CHARS = 40_000
-MAX_TURN_CHARS = 4_000     # one pasted log must not eat the whole budget
+MAX_CALL_CHARS = 60_000    # per-CALL ceiling: chapter split for marathon sessions
+MAX_TURN_CHARS = 4_000     # one pasted log must not eat a whole chapter
 
 
 @dataclass
-class ProjectBatch:
-    project: str
-    turns: list = field(default_factory=list)    # {source, session_id, role, text, ts}
-    spillover: bool = False    # true when the budget cut sessions off this run
-
-    @property
-    def chars(self) -> int:
-        return sum(len(t["text"]) for t in self.turns)
+class SessionUpdate:
+    """One session's dialogue the distiller has not seen yet."""
+    source: str
+    session_id: str
+    turns: list = field(default_factory=list)   # {source, session_id, role, text, ts}
 
 
 def open_index(db_path: Path) -> sqlite3.Connection:
@@ -70,38 +70,49 @@ def select_projects(db: sqlite3.Connection, selector: list,
     return sorted(p for p, _ in rows if p in wanted)
 
 
-def new_dialogue(db: sqlite3.Connection, project: str,
-                 marks: Watermarks) -> ProjectBatch:
-    """Everything said in this project since the last run, oldest first,
-    grouped so a session is either taken whole or left whole for next time."""
+def pending_sessions(db: sqlite3.Connection, project: str,
+                     marks: Watermarks) -> list[SessionUpdate]:
+    """Every session with dialogue newer than its watermark, oldest first.
+    A late-indexed old session has no mark and is picked up whole; an appended
+    session contributes only its tail — «обновления по сессии»."""
     rows = db.execute(
         "SELECT source, session_id, role, text, ts FROM chunks "
         "WHERE project = ? AND role IN ('user', 'assistant') "
         "ORDER BY ts, turn_index", (project,)).fetchall()
 
-    sessions: dict[str, list] = {}
+    per: dict[str, SessionUpdate] = {}
     for source, sid, role, text, ts in rows:
         if not text or not text.strip():
             continue
         ts = int(ts or 0)
         if ts <= marks.last_ts(source, sid):
             continue
-        sessions.setdefault(f"{source}:{sid}", []).append(
-            {"source": source, "session_id": sid, "role": role,
-             "text": text[:MAX_TURN_CHARS], "ts": ts})
-
-    batch = ProjectBatch(project=project)
-    for _, turns in sorted(sessions.items(), key=lambda kv: kv[1][0]["ts"]):
-        size = sum(len(t["text"]) for t in turns)
-        if batch.turns and batch.chars + size > BUDGET_CHARS:
-            batch.spillover = True
-            break
-        batch.turns.extend(turns)
-    return batch
+        upd = per.setdefault(f"{source}:{sid}",
+                             SessionUpdate(source=source, session_id=sid))
+        upd.turns.append({"source": source, "session_id": sid, "role": role,
+                          "text": text[:MAX_TURN_CHARS], "ts": ts})
+    return sorted(per.values(), key=lambda u: u.turns[0]["ts"])
 
 
-def advance_marks(marks: Watermarks, batch: ProjectBatch) -> None:
-    """Only after the batch was distilled AND written — a crash in between
+def chapters(turns: list, ceiling: int | None = None) -> list[list]:
+    """A session almost always fits one call. A marathon session is split into
+    sequential chapters, in order; each later chapter's call sees the documents
+    the earlier chapters already updated, so the story stays continuous."""
+    ceiling = MAX_CALL_CHARS if ceiling is None else ceiling
+    out, cur, size = [], [], 0
+    for t in turns:
+        if cur and size + len(t["text"]) > ceiling:
+            out.append(cur)
+            cur, size = [], 0
+        cur.append(t)
+        size += len(t["text"])
+    if cur:
+        out.append(cur)
+    return out
+
+
+def advance_marks(marks: Watermarks, turns: list) -> None:
+    """Only after these turns were distilled AND written — a crash in between
     must re-process, never silently skip."""
-    for t in batch.turns:
+    for t in turns:
         marks.advance(t["source"], t["session_id"], t["ts"])
