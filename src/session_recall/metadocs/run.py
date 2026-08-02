@@ -51,7 +51,11 @@ class RunReport:
 
 
 def run_once(cfg: MetaConfig, db, distiller: Distiller,
-             data_dir: Path | None = None) -> RunReport:
+             data_dir: Path | None = None, since: float | None = None,
+             until: float | None = None) -> RunReport:
+    """The daily run distills [cfg.since, now); `metadocs index-history`
+    passes explicit since/until to distill an older window on demand — same
+    watermarks, so the two can never double-process a session."""
     repo = Path(cfg.repo).expanduser()
     ensure_repo(repo)
     marks = Watermarks(state_path(data_dir))
@@ -62,7 +66,9 @@ def run_once(cfg: MetaConfig, db, distiller: Distiller,
         commit(repo, "meta docs: migrate to entry-per-file format")
 
     for project in collect.select_projects(db, cfg.projects):
-        sessions = collect.pending_sessions(db, project, marks, since=cfg.since)
+        sessions = collect.pending_sessions(
+            db, project, marks,
+            since=cfg.since if since is None else since, until=until)
         if not sessions:
             continue
         done, note = 0, ""
