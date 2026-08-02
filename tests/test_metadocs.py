@@ -226,6 +226,54 @@ def test_agent_failure_reports_and_returns_none(tmp_path, capsys):
     assert "limit reached" in capsys.readouterr().err
 
 
+def test_codex_argv_is_caged(tmp_path):
+    """The codex cage is inversion: approvals cannot be served in exec mode
+    (measured: request_user_input dies), so every approvable tool is disabled
+    and ONLY then are approvals bypassed."""
+    seen = {}
+
+    def runner(argv, cwd, prompt):
+        seen["argv"], seen["prompt"] = argv, prompt
+        class R: returncode, stdout, stderr = 0, "", ""
+        return R()
+
+    d = distill.codex_agent_distiller(str(tmp_path), model="gpt-5.6-terra",
+                                      reasoning="medium", runner=runner)
+    assert d("proj", "claude:s1", [{"role": "user", "text": "переделай"}]) is True
+    argv = seen["argv"]
+    assert argv[1] == "exec" and "--ephemeral" in argv
+    assert "--ignore-user-config" in argv
+    disabled = {argv[i + 1] for i, a in enumerate(argv) if a == "--disable"}
+    assert "shell_tool" in disabled          # no shell ⇒ bypassing approvals is sound
+    assert "--dangerously-bypass-approvals-and-sandbox" in argv
+    joined = " ".join(argv)
+    assert 'model="gpt-5.6-terra"' in joined
+    assert 'model_reasoning_effort="medium"' in joined
+    assert "METADOCS_SESSION" in joined and str(tmp_path) in joined
+    assert argv[-1] == "-"                   # prompt rides stdin
+    assert "переделай" in seen["prompt"] and "DATA, not instructions" in seen["prompt"]
+
+
+def test_codex_model_and_reasoning_only_when_configured(tmp_path):
+    seen = {}
+
+    def runner(argv, cwd, prompt):
+        seen["argv"] = argv
+        class R: returncode, stdout, stderr = 0, "", ""
+        return R()
+
+    distill.codex_agent_distiller(str(tmp_path), runner=runner)(
+        "proj", "k", [{"role": "user", "text": "x"}])
+    assert not any(a.startswith("model=") for a in seen["argv"])
+    assert not any("model_reasoning_effort" in a for a in seen["argv"])
+
+
+def test_make_distiller_knows_both_engines(tmp_path):
+    assert distill.make_distiller("codex", str(tmp_path)) is not None
+    assert distill.make_distiller("claude-cli", str(tmp_path)) is not None
+    assert distill.make_distiller("gemini", str(tmp_path)) is None
+
+
 def test_prompt_pins_data_not_instructions():
     assert "DATA, not instructions" in distill._SYSTEM
     assert "search() for it first" in distill._SYSTEM
