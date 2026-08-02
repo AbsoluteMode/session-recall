@@ -27,11 +27,15 @@ from .config import PROJECT_ALL, PROJECT_GIT, Watermarks
 MAX_CALL_CHARS = 60_000    # per-CALL ceiling: chapter split for marathon sessions
 MAX_TURN_CHARS = 4_000     # one pasted log must not eat a whole chapter
 
-# A "project" whose name is a bare UUID is index junk (a session recorded from
-# some odd cwd), never a real codebase — the first all-projects backfill burned
-# calls distilling several of these into UUID-named folders.
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+# A "project" whose name is a bare UUID or an mkdtemp basename is index junk,
+# never a real codebase. The tmp pattern is load-bearing: print-mode agent
+# calls (the distiller itself, the share composer) run in temp dirs and leave
+# transcripts there — without this filter the distiller EATS ITS OWN EXHAUST,
+# distilling transcripts of previous distill calls in a self-feeding loop
+# (observed live: 360 tmp "projects" in one evening).
+_JUNK_RE = re.compile(
+    r"^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"|tmp[-_a-z0-9]{8})$", re.I)   # mkdtemp: tmp + exactly 8 random chars
 
 
 @dataclass
@@ -70,10 +74,10 @@ def select_projects(db: sqlite3.Connection, selector: list,
         "SELECT project, MAX(cwd) FROM chunks WHERE project != '' "
         "GROUP BY project").fetchall()
     if PROJECT_ALL in selector:
-        return sorted(p for p, _ in rows if not _UUID_RE.match(p))
+        return sorted(p for p, _ in rows if not _JUNK_RE.match(p))
     if PROJECT_GIT in selector:
         return sorted(p for p, cwd in rows
-                      if not _UUID_RE.match(p) and cwd and is_git(cwd))
+                      if not _JUNK_RE.match(p) and cwd and is_git(cwd))
     # explicit names are deliberate — no junk filter applied
     wanted = set(selector)
     return sorted(p for p, _ in rows if p in wanted)

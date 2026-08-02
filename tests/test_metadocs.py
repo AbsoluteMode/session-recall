@@ -356,12 +356,17 @@ def test_select_projects_git_probes_cwd(db, marks):
     assert collect.select_projects(db, ["no-git"]) == ["no-git"]
 
 
-def test_select_projects_skips_uuid_junk(db, marks):
-    junk = "bcb3fb67-e6e9-4d51-af40-83fdd5986ff9"
-    add_turn(db, junk, "user", "x", 1, cwd="/tmp/x")
+def test_select_projects_skips_junk(db, marks):
+    """UUID projects and mkdtemp projects are index noise. The tmp filter is
+    what breaks the self-feeding loop: distill calls leave transcripts in temp
+    dirs, and without it the distiller distills its own exhaust."""
+    for junk in ("bcb3fb67-e6e9-4d51-af40-83fdd5986ff9", "tmpbclhg-1i",
+                 "tmp-17t6dtr", "tmpb_890sfv"):
+        add_turn(db, junk, "user", "x", 1, cwd="/tmp/x", sid=junk)
     add_turn(db, "real", "user", "x", 1, cwd="/tmp/real")
-    assert collect.select_projects(db, [PROJECT_ALL]) == ["real"]
-    assert collect.select_projects(db, [junk]) == [junk]
+    add_turn(db, "tmpserver", "user", "x", 1, cwd="/tmp/t")  # not mkdtemp-shaped
+    assert collect.select_projects(db, [PROJECT_ALL]) == ["real", "tmpserver"]
+    assert collect.select_projects(db, ["tmpbclhg-1i"]) == ["tmpbclhg-1i"]
 
 
 # -- the whole run ------------------------------------------------------------
