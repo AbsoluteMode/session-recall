@@ -43,6 +43,17 @@ def add_parser(sub) -> None:
     ip.add_argument("--push", action="store_true",
                     help="push after each commit (default: commit stays local)")
     msub.add_parser("run", help="distill everything new right now")
+    hp = msub.add_parser(
+        "index-history",
+        help="one-shot: distill OLD sessions into the memory; the daily job "
+             "never touches history, this command is the only way in")
+    hp.add_argument("--from", dest="from_date", metavar="YYYY-MM-DD",
+                    help="start of the history window (default: the beginning)")
+    hp.add_argument("--until", dest="until_date", metavar="YYYY-MM-DD",
+                    help="last day of the window, inclusive (default: up to "
+                         "where the daily memory starts — nothing twice)")
+    hp.add_argument("--days", type=int, default=None,
+                    help="shorthand: the last N days before the daily memory")
     msub.add_parser("enable", help="turn the daily job on (launchd)")
     msub.add_parser("disable", help="turn the daily job off")
     msub.add_parser("status", help="show config, schedule and progress")
@@ -107,7 +118,7 @@ def run(args: argparse.Namespace) -> int:
             print(f"--- log tail ---\n{tail.strip()}")
         return 0
 
-    if cmd == "run":
+    if cmd in ("run", "index-history"):
         import os as _os
         from .run import acquire_lock
         distiller = make_distiller(cfg.engine, cfg.repo, model=cfg.model)
@@ -117,15 +128,37 @@ def run(args: argparse.Namespace) -> int:
         if not app_config.DB_PATH.exists():
             print(f"no index at {app_config.DB_PATH} — run: session-recall index")
             return 1
+
+        since, until = None, None
+        if cmd == "index-history":
+            # history ends where the daily memory begins, unless said otherwise
+            until = cfg.since or None
+            since = 0.0
+            if args.days is not None:
+                since = (until or time.time()) - args.days * 86400
+            if args.from_date or args.until_date:
+                from ..timefmt import date_range_to_epoch
+                try:
+                    start_ts, end_ts = date_range_to_epoch(
+                        args.from_date, args.until_date, None)
+                except ValueError as exc:
+                    print(exc)
+                    return 1
+                since = float(start_ts) if start_ts is not None else since
+                until = float(end_ts) if end_ts is not None else until
+            span = (f"{args.from_date or 'the beginning'} → "
+                    f"{args.until_date or 'start of daily memory'}")
+            print(f"distilling history: {span}")
+
         lock_fd = acquire_lock(app_config.DATA_DIR)
         if lock_fd is None:
             # exit 0 on purpose: the overlap is expected (nightly job vs a long
-            # manual backfill), and the other run is doing this run's work
+            # manual history pass), and the other run is doing this run's work
             print("another meta docs run is already in progress — stepping aside")
             return 0
         db = open_index(app_config.DB_PATH)
         try:
-            report = run_once(cfg, db, distiller)
+            report = run_once(cfg, db, distiller, since=since, until=until)
         finally:
             db.close()
             _os.close(lock_fd)

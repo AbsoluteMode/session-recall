@@ -80,11 +80,14 @@ def select_projects(db: sqlite3.Connection, selector: list,
 
 
 def pending_sessions(db: sqlite3.Connection, project: str, marks: Watermarks,
-                     since: float = 0.0) -> list[SessionUpdate]:
+                     since: float = 0.0,
+                     until: float | None = None) -> list[SessionUpdate]:
     """Every session with dialogue newer than its watermark, oldest first.
     A late-indexed old session has no mark and is picked up whole; an appended
     session contributes only its tail — «обновления по сессии». `since` is the
-    config's start-of-memory: dialogue older than it is nobody's backlog."""
+    start-of-memory (dialogue older than it is nobody's backlog); `until` caps
+    the window from above — `index-history` uses it to stop exactly where the
+    daily memory begins, so the two never overlap."""
     rows = db.execute(
         "SELECT source, session_id, role, text, ts FROM chunks "
         "WHERE project = ? AND role IN ('user', 'assistant') "
@@ -95,7 +98,9 @@ def pending_sessions(db: sqlite3.Connection, project: str, marks: Watermarks,
         if not text or not text.strip():
             continue
         ts = int(ts or 0)
-        if ts < since or ts <= marks.last_ts(source, sid):
+        if ts < since or (until is not None and ts >= until):
+            continue
+        if ts <= marks.last_ts(source, sid):
             continue
         upd = per.setdefault(f"{source}:{sid}",
                              SessionUpdate(source=source, session_id=sid))

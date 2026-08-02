@@ -258,6 +258,30 @@ def test_collect_since_cuts_history(db, marks):
     assert collect.pending_sessions(db, "p", marks, since=1000) == []
 
 
+def test_collect_window_for_history(db, marks):
+    """index-history distills [since, until): the cap is where the daily
+    memory starts, so the two paths can never double-process."""
+    add_turn(db, "p", "user", "старое", 100, sid="s1")
+    add_turn(db, "p", "user", "в окне", 500, sid="s2")
+    add_turn(db, "p", "user", "уже дневное", 900, sid="s3")
+    got = collect.pending_sessions(db, "p", marks, since=300, until=900)
+    assert [u.session_id for u in got] == ["s2"]
+
+
+def test_history_and_daily_share_watermarks(db, tmp_path, repo, monkeypatch):
+    """A session distilled by the daily run is invisible to a later history
+    pass — same marks, no double work."""
+    monkeypatch.setattr("session_recall.metadocs.run.state_path",
+                        lambda d=None: tmp_path / "st.json")
+    add_turn(db, "proj", "user", "сегодняшняя работа", 900)
+    cfg = MetaConfig(repo=str(repo), projects=[PROJECT_ALL], since=800)
+    seen = []
+    distiller = lambda p, k, t: seen.append((k, t[0]["text"])) or True
+    run_once(cfg, db, distiller)                          # daily
+    run_once(cfg, db, distiller, since=0.0, until=None)   # history over ALL
+    assert seen == [("claude:sess-1", "сегодняшняя работа")]
+
+
 def test_collect_sessions_ordered_oldest_first(db, marks):
     add_turn(db, "p", "user", "later story", 300, sid="s2")
     add_turn(db, "p", "user", "earlier story", 100, sid="s1")
