@@ -54,9 +54,11 @@ storage locations, lookup commands, naming schemes. Retrieval instructions \
 ONLY — never copy the stored values themselves into the map.
 
 Rules:
-- Update existing entries instead of duplicating them; merge when the new \
-dialogue continues an old story. Keep entries that the new dialogue does not \
-touch.
+- Before adding ANYTHING, search the current documents for an entry about the \
+same bug, action, decision, or storage location — and update or extend that \
+entry instead of adding a twin. A new entry is for a genuinely new story only; \
+merge when the new dialogue continues an old one. Keep entries the new \
+dialogue does not touch.
 - Every entry ends with a `sources:` line listing session ids it came from. \
 Cite artifacts that exist outside this machine (PR numbers, commits, paths) \
 so an entry can be checked without the transcripts.
