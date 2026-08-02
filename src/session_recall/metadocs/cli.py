@@ -1,6 +1,7 @@
 """`session-recall metadocs …` — setup, the daily run, and the switch.
 
-    metadocs init <repo> [--projects git|all|NAME…] [--daily-at HH:MM] [--push]
+    metadocs init <repo> [--projects git|all|NAME…] [--daily-at HH:MM]
+                  [--model NAME] [--from-today] [--push]
     metadocs run            one distill pass now (also what the cron invokes)
     metadocs enable         start the daily launchd job
     metadocs disable        stop it
@@ -9,6 +10,7 @@
 
 import argparse
 import re
+import time
 from pathlib import Path
 
 from .. import config as app_config
@@ -32,6 +34,12 @@ def add_parser(sub) -> None:
                     help='"git" (default: every project that is a git checkout), '
                          '"all", or explicit project names')
     ip.add_argument("--daily-at", default="21:00", metavar="HH:MM")
+    ip.add_argument("--model", default="",
+                    help="agent model (default: the claude CLI's own default); "
+                         "the distiller never picks a model on its own")
+    ip.add_argument("--from-today", action="store_true",
+                    help="start the memory now: dialogue older than this "
+                         "moment is never distilled")
     ip.add_argument("--push", action="store_true",
                     help="push after each commit (default: commit stays local)")
     msub.add_parser("run", help="distill everything new right now")
@@ -49,13 +57,17 @@ def run(args: argparse.Namespace) -> int:
             return 1
         cfg = MetaConfig(repo=str(Path(args.repo).expanduser()),
                          projects=list(args.projects),
-                         daily_at=args.daily_at, push=bool(args.push))
+                         daily_at=args.daily_at, push=bool(args.push),
+                         model=args.model,
+                         since=time.time() if args.from_today else 0.0)
         md_config.save(cfg)
         sel = ("every indexed project" if PROJECT_ALL in cfg.projects else
                "every project with a git checkout" if PROJECT_GIT in cfg.projects
                else ", ".join(cfg.projects))
         print(f"meta docs configured\n  repo: {cfg.repo}\n  tracking: {sel}\n"
               f"  daily at: {cfg.daily_at}\n"
+              f"  model: {cfg.model or '(claude CLI default)'}\n"
+              f"  memory starts: {'now' if cfg.since else 'from the beginning'}\n"
               f"  push: {'on' if cfg.push else 'off (commits stay local)'}\n"
               "next: session-recall metadocs enable   (or `run` for one pass now)")
         return 0
@@ -91,7 +103,7 @@ def run(args: argparse.Namespace) -> int:
     if cmd == "run":
         import os as _os
         from .run import acquire_lock
-        distiller = make_distiller(cfg.engine)
+        distiller = make_distiller(cfg.engine, cfg.repo, model=cfg.model)
         if distiller is None:
             print(f"unknown engine {cfg.engine!r} in metadocs.json")
             return 1
@@ -111,6 +123,6 @@ def run(args: argparse.Namespace) -> int:
             db.close()
             _os.close(lock_fd)
         print(report.summary())
-        return 1 if report.blocked else 0
+        return 0
 
     return 1

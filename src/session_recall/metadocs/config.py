@@ -24,8 +24,13 @@ class MetaConfig:
     repo: str                          # git repo the documents live in
     projects: list = field(default_factory=lambda: [PROJECT_GIT])
     daily_at: str = "21:00"            # local wall-clock time of the daily run
-    engine: str = "claude-cli"         # distiller engine; see distill.make_distiller
+    engine: str = "claude-cli"         # distiller agent; see distill.make_distiller
     push: bool = False                 # commit is always local; pushing is opt-in
+    model: str = ""                    # agent model; "" = the CLI's own default.
+                                       # Config-only on purpose: the distiller
+                                       # must never pick a model silently.
+    since: float = 0.0                 # epoch; dialogue older than this is not
+                                       # distilled («с сегодняшнего дня»)
 
 
 def config_path(data_dir: Path | None = None) -> Path:
