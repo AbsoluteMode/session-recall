@@ -387,6 +387,65 @@ def test_run_commit_per_project(db, tmp_path, repo, monkeypatch):
     assert [c[0] for c in report.commits] == ["other", "proj"]
 
 
+# -- search index integration -------------------------------------------------
+class _FakeStore:
+    def __init__(self):
+        self.indexed, self.chunks, self.pruned = {}, [], 0
+
+    def is_indexed(self, path, sig):
+        return self.indexed.get(path) == sig
+
+    def embeddings_by_hash(self, path):
+        return {}
+
+    def delete_file(self, path):
+        self.chunks = [c for c in self.chunks if c.file_path != path]
+
+    def add(self, chunk, vec):
+        self.chunks.append(chunk)
+
+    def mark_indexed(self, path, sig, source="claude"):
+        self.indexed[path] = sig
+
+    def prune_deleted(self, source=None):
+        self.pruned += 1
+        return 0
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+class _FakeEmbedder:
+    def embed_documents(self, texts):
+        return [b"\x00" * 4 for _ in texts]
+
+
+def test_entries_join_the_index_as_metadocs_source(repo):
+    from session_recall.metadocs.indexing import index_metadocs
+    entries.save(repo, Entry(id="bug-idx001", project="proj", category="bugs",
+                             title="таймаут", body="лечили так"))
+    entries.save(repo, Entry(id="use-idx002", project="", category="user",
+                             title="карта", body="secrets в Doppler"))
+    store = _FakeStore()
+    n = index_metadocs(store, _FakeEmbedder(), repo)
+    assert n == 2
+    assert {c.source for c in store.chunks} == {"metadocs"}
+    assert {c.project for c in store.chunks} == {"proj", "user-map"}
+    assert all(c.role == "doc" for c in store.chunks)
+    # unchanged files are skipped on the next sweep; an edit re-indexes one
+    assert index_metadocs(store, _FakeEmbedder(), repo) == 0
+    e = entries.load(repo, "bug-idx001")
+    e.body = "дополнили"
+    entries.save(repo, e)
+    import os as _os
+    _os.utime(entries.entry_path(repo, e),
+              (entries.entry_path(repo, e).stat().st_mtime + 2,) * 2)
+    assert index_metadocs(store, _FakeEmbedder(), repo) == 1
+
+
 # -- single-run lock ----------------------------------------------------------
 def test_second_run_steps_aside_while_first_holds_lock(tmp_path):
     fd = run_mod.acquire_lock(tmp_path)

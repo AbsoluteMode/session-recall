@@ -113,13 +113,24 @@ def main(argv=None):
         claude_root = config.CLAUDE_PROJECTS if args.source in {"all", "claude"} else None
         codex_roots = ((config.CODEX_SESSIONS, config.CODEX_ARCHIVED_SESSIONS)
                        if args.source in {"all", "codex"} else ())
+        embedder = make_embedder()
         n = index_corpus(
             store,
-            make_embedder(),
+            embedder,
             claude_root,
             codex_dirs=codex_roots,
         )
         print(f"indexed {n} chunks from changed transcripts")
+        # meta docs entries ride the same index (source="metadocs") whenever
+        # the feature is configured; the SessionStart hook keeps them fresh
+        if args.source == "all":
+            from .metadocs import config as md_config
+            md_cfg = md_config.load()
+            if md_cfg is not None:
+                from .metadocs.indexing import index_metadocs
+                m = index_metadocs(store, embedder, Path(md_cfg.repo).expanduser())
+                if m:
+                    print(f"indexed {m} meta docs entr(y/ies)")
         _print_corpus_summary(store)
     elif args.cmd == "search":
         recall = Recall(store, make_embedder(), make_reranker())
