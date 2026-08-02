@@ -13,6 +13,7 @@ def test_cli_index_then_search(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
     monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")  # keep the live metadocs config out of the test
     monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(cli, "make_reranker", lambda: __import__("session_recall.rerank", fromlist=["FakeReranker"]).FakeReranker())
     cli.main(["index"])
@@ -31,6 +32,7 @@ def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
     monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")  # keep the live metadocs config out of the test
     monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(cli, "make_reranker", lambda: None)
     cli.main(["index"])

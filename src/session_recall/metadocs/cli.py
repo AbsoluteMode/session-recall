@@ -38,8 +38,8 @@ def add_parser(sub) -> None:
                     help="agent model (default: the claude CLI's own default); "
                          "the distiller never picks a model on its own")
     ip.add_argument("--from-today", action="store_true",
-                    help="start the memory now: dialogue older than this "
-                         "moment is never distilled")
+                    help="start the memory today: dialogue from before local "
+                         "midnight is never distilled")
     ip.add_argument("--push", action="store_true",
                     help="push after each commit (default: commit stays local)")
     msub.add_parser("run", help="distill everything new right now")
@@ -55,11 +55,18 @@ def run(args: argparse.Namespace) -> int:
         if not _TIME_RE.match(args.daily_at):
             print(f"--daily-at must be HH:MM, got {args.daily_at!r}")
             return 1
+        if args.from_today:
+            # local midnight, not "this second": «с сегодняшнего дня» includes
+            # the sessions already run today
+            lt = time.localtime()
+            since = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday,
+                                 0, 0, 0, 0, 0, -1))
+        else:
+            since = 0.0
         cfg = MetaConfig(repo=str(Path(args.repo).expanduser()),
                          projects=list(args.projects),
                          daily_at=args.daily_at, push=bool(args.push),
-                         model=args.model,
-                         since=time.time() if args.from_today else 0.0)
+                         model=args.model, since=since)
         md_config.save(cfg)
         sel = ("every indexed project" if PROJECT_ALL in cfg.projects else
                "every project with a git checkout" if PROJECT_GIT in cfg.projects
