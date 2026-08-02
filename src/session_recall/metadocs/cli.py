@@ -34,9 +34,14 @@ def add_parser(sub) -> None:
                     help='"git" (default: every project that is a git checkout), '
                          '"all", or explicit project names')
     ip.add_argument("--daily-at", default="21:00", metavar="HH:MM")
+    ip.add_argument("--engine", default="claude-cli",
+                    choices=("claude-cli", "codex"),
+                    help="which agent distills: the claude CLI or codex exec")
     ip.add_argument("--model", default="",
-                    help="agent model (default: the claude CLI's own default); "
+                    help="agent model (default: the engine's own default); "
                          "the distiller never picks a model on its own")
+    ip.add_argument("--reasoning", default="",
+                    help="codex engine: reasoning effort (e.g. medium)")
     ip.add_argument("--from-today", action="store_true",
                     help="start the memory today: dialogue from before local "
                          "midnight is never distilled")
@@ -77,15 +82,17 @@ def run(args: argparse.Namespace) -> int:
         cfg = MetaConfig(repo=str(Path(args.repo).expanduser()),
                          projects=list(args.projects),
                          daily_at=args.daily_at, push=bool(args.push),
-                         model=args.model, since=since)
+                         engine=args.engine, model=args.model,
+                         reasoning=args.reasoning, since=since)
         md_config.save(cfg)
         sel = ("every indexed project" if PROJECT_ALL in cfg.projects else
                "every project with a git checkout" if PROJECT_GIT in cfg.projects
                else ", ".join(cfg.projects))
+        effort = f" / {cfg.reasoning}" if cfg.reasoning else ""
         print(f"meta docs configured\n  repo: {cfg.repo}\n  tracking: {sel}\n"
               f"  daily at: {cfg.daily_at}\n"
-              f"  model: {cfg.model or '(claude CLI default)'}\n"
-              f"  memory starts: {'now' if cfg.since else 'from the beginning'}\n"
+              f"  agent: {cfg.engine} / {cfg.model or '(engine default)'}{effort}\n"
+              f"  memory starts: {'today' if cfg.since else 'from the beginning'}\n"
               f"  push: {'on' if cfg.push else 'off (commits stay local)'}\n"
               "next: session-recall metadocs enable   (or `run` for one pass now)")
         return 0
@@ -121,7 +128,8 @@ def run(args: argparse.Namespace) -> int:
     if cmd in ("run", "index-history"):
         import os as _os
         from .run import acquire_lock
-        distiller = make_distiller(cfg.engine, cfg.repo, model=cfg.model)
+        distiller = make_distiller(cfg.engine, cfg.repo, model=cfg.model,
+                                   reasoning=cfg.reasoning)
         if distiller is None:
             print(f"unknown engine {cfg.engine!r} in metadocs.json")
             return 1

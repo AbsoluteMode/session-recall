@@ -29,6 +29,8 @@ class MetaConfig:
     model: str = ""                    # agent model; "" = the CLI's own default.
                                        # Config-only on purpose: the distiller
                                        # must never pick a model silently.
+    reasoning: str = ""                # codex engine only: reasoning effort
+                                       # ("medium", …); "" = engine default
     since: float = 0.0                 # epoch; dialogue older than this is not
                                        # distilled («с сегодняшнего дня»)
 

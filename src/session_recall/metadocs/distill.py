@@ -147,9 +147,79 @@ def cli_agent_distiller(repo: str, model: str = "", runner=None) -> Distiller:
     return distill
 
 
+# -- codex engine -------------------------------------------------------------
+# The cage, inverted — measured live against codex-cli 0.144:
+# - approvals in `codex exec` arrive as `request_user_input`, which exec mode
+#   cannot serve: every MCP call died as "user cancelled" regardless of
+#   approval_mode/feature flags. So instead of approving tools we remove every
+#   tool that would need approval: `--disable shell_tool` (verified: the agent
+#   reports no shell), plus unified_exec/code_mode_host/apps/browser/collab.
+#   Only then is --dangerously-bypass-approvals-and-sandbox sound: the sandbox
+#   only ever guarded shell commands, and there is no shell left to guard.
+# - `--ephemeral`: no transcript is persisted, so a distill run cannot re-enter
+#   the index as a session (the claude engine still has that caveat).
+# - `--ignore-user-config`: no user hooks or MCP servers bleed into the cage.
+# - no --system-prompt flag exists: instructions ride at the top of stdin.
+_CODEX_DISABLED = ("shell_tool", "unified_exec", "code_mode_host",
+                   "apps", "browser_use", "collab")
+
+
+def codex_agent_distiller(repo: str, model: str = "", reasoning: str = "",
+                          runner=None) -> Distiller:
+    def run(argv, cwd, prompt):
+        return subprocess.run(argv, cwd=cwd, input=prompt, capture_output=True,
+                              text=True, timeout=CLI_TIMEOUT_S)
+
+    runner = runner or run
+
+    def distill(project: str, session_key: str, turns: list) -> bool | None:
+        if not turns:
+            return True
+        with tempfile.TemporaryDirectory() as empty:
+            server = _mcp_config(repo, project, session_key)["mcpServers"]["metadocs"]
+            env_toml = ", ".join(
+                f"{k}={json.dumps(v)}" for k, v in server["env"].items())
+            argv = [shutil.which("codex") or "codex", "exec",
+                    "--ephemeral", "--skip-git-repo-check",
+                    "--ignore-user-config", "-C", empty,
+                    "--dangerously-bypass-approvals-and-sandbox"]
+            for feature in _CODEX_DISABLED:
+                argv += ["--disable", feature]
+            argv += ["-c", f"mcp_servers.metadocs.command={json.dumps(server['command'])}",
+                     "-c", f"mcp_servers.metadocs.args={json.dumps(server['args'])}",
+                     "-c", f"mcp_servers.metadocs.env={{{env_toml}}}"]
+            if model:
+                argv += ["-c", f"model={json.dumps(model)}"]
+            if reasoning:
+                argv += ["-c", f"model_reasoning_effort={json.dumps(reasoning)}"]
+            argv += ["-"]          # prompt arrives on stdin
+            prompt = f"{_SYSTEM}\n\n{_dialogue(project, turns)}"
+            try:
+                done = runner(argv, empty, prompt)
+            except subprocess.TimeoutExpired:
+                print(f"[distill {project}] timeout after {CLI_TIMEOUT_S}s",
+                      file=sys.stderr)
+                return None
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f"[distill {project}] spawn failed: {exc}", file=sys.stderr)
+                return None
+        if getattr(done, "returncode", 1) != 0:
+            tail = (getattr(done, "stderr", "") or "")[-300:].strip()
+            print(f"[distill {project}] rc={done.returncode}: {tail}",
+                  file=sys.stderr)
+            return None
+        return True
+
+    return distill
+
+
 def make_distiller(engine: str, repo: str, model: str = "",
-                   runner=None) -> Distiller | None:
-    """The engine and model come from metadocs.json and nowhere else."""
+                   reasoning: str = "", runner=None) -> Distiller | None:
+    """The engine, model and reasoning come from metadocs.json and nowhere
+    else — the distiller never picks them silently."""
     if engine in ("claude-cli", "cli", "claude", "claude-cli-agent"):
         return cli_agent_distiller(repo, model=model, runner=runner)
+    if engine == "codex":
+        return codex_agent_distiller(repo, model=model, reasoning=reasoning,
+                                     runner=runner)
     return None
