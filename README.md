@@ -264,32 +264,38 @@ index only makes sense across several machines — at the cost of privacy and ne
 
 Raw recall answers "what was said". meta docs answers the questions agents
 actually ask mid-task: *was this bug fixed before? how do I perform this
-action? why was it decided this way?* A daily job distills each session's
-dialogue — user messages and final answers only, never the tool noise — into
-living documents inside a git repository of your choice:
+action? why was it decided this way?* A daily job hands each session's
+dialogue — user messages and final answers only, never the tool noise — to a
+distiller agent that maintains entries in a git repository of your choice:
 
-- `<project>/bugs.md` — bugs that were actually fixed: how each was
-  recognized, diagnosed, fixed, and proven fixed;
-- `<project>/actions.md` — procedures, step by step, written so an agent asked
+- `<project>/bugs/` — bugs that were actually fixed: how each was recognized,
+  diagnosed, fixed, and proven fixed;
+- `<project>/actions/` — procedures, step by step, written so an agent asked
   again can follow the entry alone;
-- `<project>/decisions.md` — contested choices: what was decided, why that
-  way, what was rejected;
-- `USER.md` — a map of where your information lives and *how to find it*
+- `<project>/decisions/` — contested choices: what was decided, why that way,
+  what was rejected;
+- `USER/` — a global map of where your information lives and *how to find it*
   (lookup commands, storage locations — never the stored values themselves).
 
+One file per entry, with related PRs and source sessions in the frontmatter.
+
 ```bash
-session-recall metadocs init ~/meta-docs            # every git project; or --projects name…
-session-recall metadocs run                         # one pass now
-session-recall metadocs enable                      # daily launchd job (default 21:00)
+session-recall metadocs init ~/meta-docs --from-today   # memory starts now
+session-recall metadocs run                             # one pass now
+session-recall metadocs enable                          # daily launchd job (default 21:00)
 session-recall metadocs status
 ```
 
-Runs are incremental (per-session watermarks), the distiller is a caged
-`claude -p` call with all tools stripped, every document is scanned for
-secrets before it is written (a flagged doc is blocked, not masked), and each
-run ends in one git commit — review is a diff, undo is a revert, and sharing
-the memory with a team is just pushing the repo somewhere private. Commits
-stay local unless you opt into `--push`.
+The agent's whole world is four MCP verbs — `search / create / edit /
+delete` — and the load-bearing rules are server mechanics, not prompt
+requests: `create` is refused until the agent has `search`ed (dedup is
+mandatory), entries are scanned for secrets before a byte reaches disk, and
+`delete` demands a reason. Every built-in tool is stripped from the call.
+Runs are incremental (per-session watermarks) and each changed project gets
+its own commit — review is a diff, undo is a revert, and sharing the memory
+with a team is just pushing the repo somewhere private. Commits stay local
+unless you opt into `--push`; the model comes from config only
+(`init --model …`).
 
 ## Privacy — hard invariant
 
