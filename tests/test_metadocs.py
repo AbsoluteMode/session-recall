@@ -121,6 +121,13 @@ def test_prompt_marks_dialogue_as_data():
            "never copy the stored values themselves" in distill._SYSTEM
 
 
+def test_prompt_demands_update_before_add():
+    """Maxim's rule: актуализировать — look for an existing entry first,
+    adding a twin is the failure mode."""
+    assert "Before adding ANYTHING" in distill._SYSTEM
+    assert "instead of adding a twin" in distill._SYSTEM
+
+
 def test_cli_distiller_runs_in_empty_cwd_no_tools():
     seen = {}
 
