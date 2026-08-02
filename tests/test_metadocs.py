@@ -257,6 +257,18 @@ def test_run_commit_per_project(db, tmp_path, repo, monkeypatch):
     assert "meta docs: proj — 1 session(s)" in log
 
 
+# -- single-run lock ----------------------------------------------------------
+def test_second_run_steps_aside_while_first_holds_lock(tmp_path):
+    import os
+    fd = run_mod.acquire_lock(tmp_path)
+    assert fd is not None
+    assert run_mod.acquire_lock(tmp_path) is None    # nightly vs manual overlap
+    os.close(fd)
+    fd2 = run_mod.acquire_lock(tmp_path)             # released with the process
+    assert fd2 is not None
+    os.close(fd2)
+
+
 # -- schedule -----------------------------------------------------------------
 def test_plist_shape(tmp_path):
     plist = schedule.build_plist("21:30", tmp_path / "m.log")

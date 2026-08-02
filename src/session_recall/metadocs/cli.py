@@ -89,6 +89,8 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     if cmd == "run":
+        import os as _os
+        from .run import acquire_lock
         distiller = make_distiller(cfg.engine)
         if distiller is None:
             print(f"unknown engine {cfg.engine!r} in metadocs.json")
@@ -96,11 +98,18 @@ def run(args: argparse.Namespace) -> int:
         if not app_config.DB_PATH.exists():
             print(f"no index at {app_config.DB_PATH} — run: session-recall index")
             return 1
+        lock_fd = acquire_lock(app_config.DATA_DIR)
+        if lock_fd is None:
+            # exit 0 on purpose: the overlap is expected (nightly job vs a long
+            # manual backfill), and the other run is doing this run's work
+            print("another meta docs run is already in progress — stepping aside")
+            return 0
         db = open_index(app_config.DB_PATH)
         try:
             report = run_once(cfg, db, distiller)
         finally:
             db.close()
+            _os.close(lock_fd)
         print(report.summary())
         return 1 if report.blocked else 0
 
