@@ -14,6 +14,7 @@ discarded whole — a garbled answer must cost one run, not corrupt a document.
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Callable
 
@@ -132,11 +133,26 @@ def cli_distiller(runner=None) -> Distiller:
                     "--system-prompt", _SYSTEM,
                     build_prompt(project, turns, docs),
                 ], empty)
-            except (OSError, subprocess.SubprocessError):
+            except subprocess.TimeoutExpired:
+                print(f"[distill {project}] timeout after {CLI_TIMEOUT_S}s",
+                      file=sys.stderr)
+                return None
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f"[distill {project}] spawn failed: {exc}", file=sys.stderr)
                 return None
         if getattr(done, "returncode", 1) != 0:
+            # the reason lives in stderr (rate limit, auth, crash) — a silent
+            # None here already cost one whole diagnostic round
+            tail = (getattr(done, "stderr", "") or "")[-300:].strip()
+            print(f"[distill {project}] rc={done.returncode}: {tail}",
+                  file=sys.stderr)
             return None
-        return parse_output(done.stdout or "")
+        out = parse_output(done.stdout or "")
+        if out is None:
+            print(f"[distill {project}] unparseable output "
+                  f"({len(done.stdout or '')} chars, no file markers)",
+                  file=sys.stderr)
+        return out
 
     return distill
 
