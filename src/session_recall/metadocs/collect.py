@@ -16,6 +16,7 @@ chunks table), so distilling needs no transcript parsing of its own and no
 sqlite-vec extension — a plain sqlite3 connection suffices.
 """
 
+import re
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field
@@ -25,6 +26,12 @@ from .config import PROJECT_ALL, PROJECT_GIT, Watermarks
 
 MAX_CALL_CHARS = 60_000    # per-CALL ceiling: chapter split for marathon sessions
 MAX_TURN_CHARS = 4_000     # one pasted log must not eat a whole chapter
+
+# A "project" whose name is a bare UUID is index junk (a session recorded from
+# some odd cwd), never a real codebase — the first all-projects backfill burned
+# calls distilling several of these into UUID-named folders.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
 @dataclass
@@ -63,9 +70,11 @@ def select_projects(db: sqlite3.Connection, selector: list,
         "SELECT project, MAX(cwd) FROM chunks WHERE project != '' "
         "GROUP BY project").fetchall()
     if PROJECT_ALL in selector:
-        return sorted(p for p, _ in rows)
+        return sorted(p for p, _ in rows if not _UUID_RE.match(p))
     if PROJECT_GIT in selector:
-        return sorted(p for p, cwd in rows if cwd and is_git(cwd))
+        return sorted(p for p, cwd in rows
+                      if not _UUID_RE.match(p) and cwd and is_git(cwd))
+    # explicit names are deliberate — no junk filter applied
     wanted = set(selector)
     return sorted(p for p, _ in rows if p in wanted)
 
