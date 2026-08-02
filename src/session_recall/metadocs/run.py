@@ -12,6 +12,8 @@ Other projects still run; each project that changed gets its own commit.
 
 import fcntl
 import os
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -96,4 +98,9 @@ def run_once(cfg: MetaConfig, db, distiller: Distiller,
             if sha:
                 report.commits.append((project, sha))
         report.projects.append((project, done, len(sessions), note))
+        # stream progress as it happens: a backlog run lasts hours, and a log
+        # that stays silent until the very end is indistinguishable from a hang
+        print(f"[metadocs {time.strftime('%H:%M')}] {project}: "
+              f"{done}/{len(sessions)} session(s)"
+              f"{' — ' + note if note else ''}", file=sys.stderr, flush=True)
     return report
