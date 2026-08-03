@@ -1,0 +1,31 @@
+schema_version: 1
+entrypoints:
+  project: project.md
+  navigation: navigation.md
+routes:
+  current_state:
+    - project.md
+    - services/
+  how_to:
+    - processes/
+  why:
+    - decisions/
+  incident_first_action:
+    - reactions/
+    - processes/
+    - services/
+  known_problem:
+    - bugs/
+  history:
+    - timeline/
+    - changelog/
+  unresolved:
+    - open-questions.md
+    - observations/
+search_fields:
+  - id
+  - title
+  - summary
+  - tags
+  - canonical_for
+  - related

@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "allow": [
+    {
+      "path": ".github/workflows/publish.yml",
+      "rule": "sensitive-assignment",
+      "literal": "token: write",
+      "reason": "Example GitHub workflow permission syntax, not a credential value."
+    },
+    {
+      "path": ".github/workflows/test.yml",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/models",
+      "reason": "Example portable application data path used by the test cache."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.codex/sessions",
+      "reason": "Example portable Codex data path, not a user-specific value."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.codex/archived_sessions",
+      "reason": "Example portable Codex archive path, not a user-specific value."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin",
+      "reason": "Example portable executable path used by pipx."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db)",
+      "reason": "Example portable index path in diagnostic output."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db",
+      "reason": "Example portable index path in setup documentation."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Example portable Claude Code settings path."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/meta-docs",
+      "reason": "Example user-selected repository path for meta docs."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Example portable Session Recall data directory."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/meta-docs",
+      "reason": "Example user-selected repository path for meta docs."
+    },
+    {
+      "path": "docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md",
+      "rule": "personal-path",
+      "literal": "/Users/maxim/.claude/projects/-Users-maxim/98688231-0c4e-471d-aec2-a4ee74efda4f.jsonl",
+      "reason": "Historical example path retained as evidence in a public engineering decision."
+    },
+    {
+      "path": "docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md",
+      "rule": "personal-path",
+      "literal": "/Users/maxim",
+      "reason": "Historical example path fragment retained in a public engineering decision."
+    },
+    {
+      "path": "docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/projects/-Users-maxim/",
+      "reason": "Historical example of Claude Code project-path encoding."
+    },
+    {
+      "path": "docs/decisions/2026-06-27-recall-ergonomics-when-and-recent-sessions.md",
+      "rule": "personal-path",
+      "literal": "~/sidekey)",
+      "reason": "Historical example project path retained as engineering evidence."
+    },
+    {
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin/session-recall{,-mcp}",
+      "reason": "Example portable wrapper executable paths."
+    },
+    {
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Example portable Claude Code settings path."
+    },
+    {
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "rule": "personal-path",
+      "literal": "~/.zshenv",
+      "reason": "Example portable shell environment path."
+    },
+    {
+      "path": "docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md",
+      "rule": "personal-path",
+      "literal": "~/.ssh",
+      "reason": "Example portable SSH storage path used in a rejected alternative."
+    },
+    {
+      "path": "docs/decisions/2026-07-31-metadocs-living-project-memory.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/salvage/",
+      "reason": "Example portable local recovery path."
+    },
+    {
+      "path": "skills/setup/SKILL.md",
+      "rule": "sensitive-assignment",
+      "literal": "VOYAGE_API_KEY=…`",
+      "reason": "Example redacted environment-variable placeholder, not a credential value."
+    },
+    {
+      "path": "skills/setup/SKILL.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Example portable Session Recall data directory."
+    },
+    {
+      "path": "skills/setup/SKILL.md",
+      "rule": "personal-path",
+      "literal": "~/Sync/sr-share",
+      "reason": "Example user-selected shared-folder transport path."
+    }
+  ]
+}
