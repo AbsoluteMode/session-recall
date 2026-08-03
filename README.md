@@ -4,16 +4,16 @@
 [README.es-ES.md](README.es-ES.md) (community translation)*
 
 **Shared memory for Claude Code, Codex, and Cursor.** Pick up work from a month ago without
-re-explaining it — and Claude can read what Codex worked out yesterday, because both engines
-feed one index. Not a summary file someone maintains by hand: the actual turns, including tool
+re-explaining it — and Claude can read what Codex or Cursor worked out yesterday, because all
+three feed one index. Not a summary file someone maintains by hand: the actual turns, including tool
 calls and reasoning, searchable by meaning.
 
 ```console
 $ session-recall index
 indexed 2175 chunks from changed transcripts
 
-your history: 1052 sessions spanning 168 days, 40,035 searchable fragments
-  Claude Code 372 · Codex 680
+your history: 1053 sessions spanning 168 days, 40,037 searchable fragments
+  Claude Code 372 · Codex 680 · Cursor 1
   busiest: sidekey, trend_detection, glitch
 ```
 
@@ -64,9 +64,9 @@ indexed today come from Claude Code, Codex, and Cursor.
 `recall_search`, `grep` and `recent_sessions` also take an optional `scope_cwd` — pass your
 current working directory to scope results to the current repo (worktrees collapse to the repo
 root); omit it for cross-project recall. Ranked hits carry a human-readable `when_human`
-timestamp alongside the raw epoch. Every MCP tool accepts an optional `source` (`claude` or
-`codex`); omit it to use the unified history. Results include provenance as `source=claude` or
-`source=codex`. The three discovery tools also accept `on_date` for one day or inclusive
+timestamp alongside the raw epoch. Every MCP tool accepts an optional `source` (`claude`,
+`codex`, or `cursor`); omit it to use the unified history. Results include provenance such as
+`source=claude`, `source=codex`, or `source=cursor`. The three discovery tools also accept `on_date` for one day or inclusive
 `start_date` / `end_date` (`YYYY-MM-DD`) plus an optional IANA `timezone`, so an agent can
 constrain retrieval to an actual local calendar day instead of hoping a date written into the
 semantic query affects ranking. If `timezone` is omitted, Session Recall uses the timezone of
@@ -78,16 +78,20 @@ the computer running the MCP server.
 ## How it works
 
 Claude Code transcripts, Codex sessions from `~/.codex/sessions` plus
-`~/.codex/archived_sessions`, and Cursor sessions (read via a snapshot of its
-SQLite store, `User/globalStorage/state.vscdb`; subagent sessions skipped,
-workspaces mapped to projects) share the same index.
+`~/.codex/archived_sessions`, and Cursor sessions (read from its SQLite store,
+`User/globalStorage/state.vscdb`; subagent sessions skipped, workspaces mapped
+to projects) share the same index. Cursor bubbles are normalized into durable,
+content-addressed JSONL snapshots under the session-recall data directory, so
+raw navigation keeps working after Cursor closes, upgrades, or is uninstalled.
 Only the conversation "surface" is embedded — user prompts and assistant text replies.
 Tool calls, results, reasoning, and other trace data are not embedded but stay reachable on
-demand via `expand_around` (and `step`) or `grep`. Raw Codex transcript files remain local;
-only the extracted conversation surface is sent to the configured embedding provider.
+demand via `expand_around` (and `step`) or `grep`. Original Claude/Codex transcripts and
+Cursor's normalized raw snapshots remain local; only the extracted conversation surface is
+sent to the configured embedding provider.
 
-Embeddings: Voyage `voyage-4-large` (dim 1024) → SQLite
-(`sqlite-vec` KNN + FTS5, bm25-ranked) → Voyage `rerank-2.5` → top-k. Indexing is
+The zero-config path is a language-aware bundled ONNX model → SQLite
+(`sqlite-vec` KNN + FTS5, bm25-ranked) → top-k. With a Voyage key the higher-quality
+hosted path is `voyage-4-large` (dim 1024) → SQLite → `rerank-2.5`. Indexing is
 incremental (by file metadata, including Codex inode+size) and cheap on live transcripts: they are append-only, so
 unchanged chunks are matched by content hash and their vectors reused — only new turns
 hit the embedding API. Moving a Codex rollout into the archive also reuses its existing
@@ -96,7 +100,7 @@ logged and retried on the next run, never aborting the rest. Claude sidechains
 (`<session>/subagents/`) and Codex spawned-subagent sessions are intentionally skipped —
 they are under-the-hood tooling, not the primary user/agent conversation.
 
-Embeddings are pluggable (Voyage is the default); the reranker is optional, and the
+Embeddings are pluggable (the bundled local model is the no-key default); the reranker is optional, and the
 system degrades gracefully to KNN + FTS without one. Switching the embedding
 provider/model is detected (an embed fingerprint is part of each file's index
 signature) and triggers a clean re-embed instead of silently mixing vector spaces.
@@ -153,6 +157,21 @@ personal marketplace; see the
 [local plugin installation guide](https://learn.chatgpt.com/docs/build-plugins#install-a-local-plugin-manually).
 Codex also asks you to review newly installed hooks once via `/hooks`.
 
+**Cursor** — this repository also ships a native `.cursor-plugin/plugin.json`, Cursor-format
+MCP and hook configs, and the same skills/commands/recall subagent. Add the repository as a
+marketplace, then install the plugin in Cursor:
+
+```bash
+cursor-agent plugin marketplace add https://github.com/AbsoluteMode/session-recall.git
+```
+
+Then type `/add-plugin session-recall` in Cursor Agent. This requires Cursor 2.5+ (plugins were
+introduced there). The plugin exposes the five recall tools to Cursor and its `sessionStart`
+hook refreshes Claude Code, Codex, and Cursor history together. For local development, launch
+`cursor-agent --plugin-dir /absolute/path/to/session-recall` instead of installing a cached copy.
+Cursor shows its normal one-time approval for the local stdio MCP server; approve
+`session-recall` so the tools can start.
+
 ### 3. Check it works
 
 ```bash
@@ -162,8 +181,14 @@ session-recall search "something you actually discussed last week"
 Hits with a `score` mean semantic search is live. In the agent, `claude mcp list` should show
 `session-recall ✔ Connected`, and asking it about past work should trigger `recall_search`.
 
-Nothing else to configure: the bundled `SessionStart` hook re-indexes in the background from
-then on, so the index keeps up with both hosts on its own.
+Nothing else to configure: each native plugin ships the host's startup-hook format and re-indexes
+in the background, so the shared index keeps up with all three histories on its own.
+
+Cursor is auto-detected at its normal macOS/Linux data path and does not need to be running.
+If you use a portable or custom Cursor profile, point directly at its database with
+`SESSION_RECALL_CURSOR_DB=/path/to/User/globalStorage/state.vscdb`. Session Recall opens it
+read-only and uses SQLite's backup API, so a live WAL database is read consistently without
+blocking the editor.
 
 ### Troubleshooting
 
@@ -175,8 +200,9 @@ $ session-recall health
 [ok  ] Freshness  2 minutes behind
 [warn] Embedder   responded in 5828 ms
                   → slow provider will make indexing crawl
-[ok  ] Corpus     1053 sessions (claude 373, codex 680)
-[ok  ] Sources    claude, codex present
+[ok  ] Vector space  builtin/BAAI/bge-small-en-v1.5/384
+[ok  ] Corpus     1054 sessions (claude 373, codex 680, cursor 1)
+[ok  ] Sources    claude, codex, cursor present
 
 verdict: AMBER (voyage/voyage-4-large, index at ~/.local/share/session-recall/index.db)
 ```
@@ -206,7 +232,7 @@ session-recall prune                             # drop rows for deleted transcr
 ```
 
 `search`, `recent`, `grep`, and `prune` all take an optional `--source claude|codex|cursor`; omit it to
-search both. Date filters are inclusive and either boundary may be omitted; the timezone
+search the unified history. Date filters are inclusive and either boundary may be omitted; the timezone
 defaults to this computer's and accepts any IANA name. `grep` caps at 100 matches by default.
 
 For development, an in-tree virtualenv works too:
@@ -287,7 +313,7 @@ handles multilingual history far better than `nomic`.
 
 If you installed the plugin, this is already handled — skip to the next section. The bundled
 `SessionStart` hook works on both hosts and runs `session-recall index` in the background, and
-the default `--source all` refreshes both histories. Indexing is incremental (it skips
+the default `--source all` refreshes all three histories. Indexing is incremental (it skips
 already-indexed files by signature), so staying fresh is cheap.
 
 Only if you registered the MCP server by hand, add the hook yourself in
@@ -479,9 +505,12 @@ This is a public repository. **Only code goes in it.**
   **outside the repo tree**. They physically cannot be committed.
 - API keys → environment only (`VOYAGE_API_KEY`); `.gitignore` blocks `.env`.
 - Tests → synthetic fixtures only, never a real slice of a session.
-- Claude Code transcripts plus active and archived Codex transcripts are read locally. Only
-  user/assistant surface text is embedded; tool/reasoning trace data stays out of embeddings and
-  is exposed only by explicit raw expansion or grep.
-- Chunk texts ARE sent to your configured embedding/rerank provider (Voyage by
-  default) — pick a provider you trust with your transcripts, or point the
-  OpenAI-compatible provider at a local endpoint.
+- Claude Code transcripts, active and archived Codex transcripts, and Cursor's
+  SQLite store are read locally. Cursor's normalized raw snapshots stay under
+  the data directory. Only user/assistant surface text is embedded;
+  tool/reasoning trace data stays out of embeddings and is exposed only by
+  explicit raw expansion or grep.
+- Chunk texts ARE sent to your configured embedding/rerank provider. With no
+  key or local server the bundled provider stays entirely on-device; if you
+  choose Voyage or another hosted endpoint, pick one you trust with your
+  transcript surface text.

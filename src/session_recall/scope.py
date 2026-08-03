@@ -4,27 +4,31 @@ A user-scope MCP server can't know the caller's project, so the agent passes its
 raw `cwd` and we normalize it here to a repo root, then filter the existing `cwd`
 column by a boundary-safe prefix. No schema change, no reindex.
 
-Worktrees nest UNDER the repo root (`<repo>/.claude/worktrees/<name>`), so
-stripping that suffix collapses the main checkout and every worktree to ONE
-scope — `project`-name derivation can't (it yields a junk hash per worktree).
+Worktrees nest UNDER the repo root (`<repo>/.claude/worktrees/<name>` or
+`<repo>/.worktrees/<name>`), so stripping that suffix collapses the main
+checkout and every worktree to ONE scope — `project`-name derivation can't
+(it yields a junk hash per worktree).
 
 # WHY: docs/decisions/2026-06-26-recall-project-scope.md
 """
 import os
 import re
 
-# Trailing `/.claude/worktrees/<name>` (optionally slash-terminated). Segment-
-# anchored on `$` so it only strips a real worktree suffix, never mid-path.
-_WORKTREE_SUFFIX = re.compile(r"/\.claude/worktrees/[^/]+/?$")
+# A nested worktree root plus an optional cwd below it. Segment-anchored so a
+# lookalike such as `.worktrees-cache` never matches; the tail is intentional —
+# agents are often launched from `<worktree>/src`, not the checkout root.
+_WORKTREE_SUFFIX = re.compile(
+    r"/(?:\.claude/worktrees|\.worktrees)/[^/]+(?:/.*)?$"
+)
 
 
 def repo_root(cwd: str) -> str:
     """Normalize a cwd to its parent repository root.
 
-    Strips a trailing Claude-Code worktree segment so all of a repo's sessions
-    (main + every worktree) share one scope; otherwise returns the path with any
-    trailing slash removed. Pure string op — works on historical/deleted paths
-    where a `git` call would fail.
+    Strips a nested worktree segment and any cwd below it so all of a repo's
+    sessions (main + every worktree) share one scope; otherwise returns the path
+    with any trailing slash removed. Pure string op — works on
+    historical/deleted paths where a `git` call would fail.
     """
     if not cwd:
         return cwd

@@ -58,6 +58,14 @@ def _transcript_footprint() -> tuple[int, int]:
                 size += p.stat().st_size
             except OSError:
                 pass
+    cursor_db = Path(config.CURSOR_DB)
+    if cursor_db.is_file():
+        files += 1
+        for path in (cursor_db, cursor_db.with_name(cursor_db.name + "-wal")):
+            try:
+                size += path.stat().st_size
+            except OSError:
+                pass
     return files, size
 
 

@@ -78,10 +78,16 @@ class Recall:
             # A same-dim model swap passes the schema check but puts the query
             # in a different vector space than the corpus — matches would be
             # silent noise. Refuse the mix: words still work, `index` heals it.
-            degraded = (f"embedder changed: the index was built with {stored_fp}, "
-                        f"the current config is {config.embed_fingerprint()} — "
-                        "semantic ranking is off until `session-recall index` "
-                        "re-embeds")
+            if stored_fp == "mixed":
+                degraded = (
+                    "mixed embedding spaces: at least one index source still "
+                    "uses another model — semantic ranking is off until "
+                    "`session-recall index` finishes cleanly for every source")
+            else:
+                degraded = (f"embedder changed: the index was built with {stored_fp}, "
+                            f"the current config is {config.embed_fingerprint()} — "
+                            "semantic ranking is off until `session-recall index` "
+                            "re-embeds")
         else:
             try:
                 qv = self.embedder.embed_query(query)
@@ -157,7 +163,7 @@ class Recall:
         self._validate_source(source)
         files: list[str] = []
         exact_files: set[str] = set()
-        for hinted_source in ((source,) if source else ("claude", "codex")):
+        for hinted_source in ((source,) if source else ("claude", "codex", "cursor")):
             hinted = self._anchor_files.get((hinted_source, session_id or "", uuid))
             if hinted and hinted not in files:
                 files.append(hinted)

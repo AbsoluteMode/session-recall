@@ -30,8 +30,9 @@ CURSOR_DB = Path(
     os.environ.get("SESSION_RECALL_CURSOR_DB") or _default_cursor_db()
 ).expanduser()
 
-# Embedding provider — PLUGGABLE. Voyage is the default (and the author's preference),
-# but any provider works: set these env vars (e.g. provider=openai,
+# Embedding provider — PLUGGABLE. A bundled ONNX model is the no-key default;
+# Voyage remains the higher-quality hosted option. Any provider works: set the
+# env vars below (e.g. provider=openai,
 # model=text-embedding-3-large, dim=1024). Adding a provider = one branch in
 # embed.make_embedder; the rest of the pipeline only sees the Embedder protocol.
 # NB: provider/model changes are detected via the embed fingerprint baked into

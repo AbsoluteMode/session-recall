@@ -51,6 +51,20 @@ def test_freshness_is_green_when_the_index_has_caught_up(tmp_path):
     store.close()
 
 
+def test_freshness_accepts_cursor_activity_without_jsonl_transcripts(tmp_path):
+    """A Cursor-only install has no Claude/Codex JSONL tree to inspect."""
+    store = Store(tmp_path / "cursor-only.db")
+    now = int(time.time())
+    store.add(_chunk("u1", now, source="cursor"), [0.0] * 1024)
+    store.db.commit()
+
+    dim = check_freshness(store, [], (now,))
+
+    assert dim.zone == "GREEN"
+    assert dim.detail == "up to date"
+    store.close()
+
+
 def test_corpus_counts_sessions_per_engine(tmp_path):
     """A total hides the failure worth catching: one source silently stopping."""
     store = Store(tmp_path / "c.db")
@@ -93,6 +107,22 @@ def test_embedder_check_is_green_when_it_answers():
     from session_recall.embed import FakeEmbedder
     from session_recall.health import check_embedder
     assert check_embedder(FakeEmbedder()).zone == "GREEN"
+
+
+def test_vector_space_check_catches_same_dimension_model_swap(tmp_path, monkeypatch):
+    from session_recall import config
+    from session_recall.health import check_embed_space
+
+    store = Store(tmp_path / "space.db")
+    store.set_meta("embed_fp", "builtin/old-model/384")
+    store.commit()
+    monkeypatch.setattr(config, "EMBED_MODEL", "new-model")
+
+    dim = check_embed_space(store)
+    assert dim.zone == "RED"
+    assert "old-model" in dim.detail and "new-model" in dim.detail
+    assert "index" in dim.hint
+    store.close()
 
 
 def test_check_all_reports_every_dimension_and_a_verdict(tmp_path):

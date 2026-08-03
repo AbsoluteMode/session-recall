@@ -1,0 +1,16 @@
+{
+  "name": "session-recall-marketplace",
+  "owner": {
+    "name": "Max Butorin"
+  },
+  "metadata": {
+    "description": "Local-first shared memory for Claude Code, Codex, and Cursor."
+  },
+  "plugins": [
+    {
+      "name": "session-recall",
+      "source": ".",
+      "description": "Search and navigate one local semantic index of Claude Code, Codex, and Cursor history."
+    }
+  ]
+}

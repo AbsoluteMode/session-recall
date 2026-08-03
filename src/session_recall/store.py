@@ -295,6 +295,29 @@ class Store:
             "INSERT INTO meta(key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
+    def refresh_embed_meta(self, fingerprint: str) -> bool:
+        """Attest the embedding space only when EVERY indexed unit agrees.
+
+        The database is shared by Claude, Codex, Cursor and meta docs.  A
+        source-selective refresh must therefore never move the global marker
+        merely because the selected source finished cleanly: untouched rows
+        may still contain vectors from the previous model.  Signatures for all
+        current producers contain ``:<provider/model/dim>:``; anything else is
+        conservatively treated as mixed until its producer refreshes it.
+
+        Returns True when the whole index is homogeneous.  The write is not
+        committed here so callers can keep their normal transaction boundary.
+        """
+        needle = f":{fingerprint}:"
+        mixed = self.db.execute(
+            "SELECT 1 FROM indexed_files "
+            "WHERE sig IS NULL OR instr(sig, ?) = 0 LIMIT 1",
+            (needle,),
+        ).fetchone()
+        value = fingerprint if mixed is None else "mixed"
+        self.set_meta("embed_fp", value)
+        return mixed is None
+
     def mark_indexed(self, path: str, sig: str, source: str = "claude"):
         # Not committed here — joins the caller's per-file transaction, so the
         # "indexed" marker can never outlive a rolled-back set of chunks.

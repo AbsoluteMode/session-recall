@@ -1,4 +1,4 @@
-"""Streaming adapters for Claude Code and Codex JSONL transcripts.
+"""Streaming adapters for Claude Code, Codex and normalized Cursor JSONL.
 
 The envelopes are unrelated, so indexing and retrieval consume normalized
 events from here. Files are always streamed: Codex rollouts can be hundreds of
@@ -203,7 +203,7 @@ def discover_codex_transcripts(sessions_dir: Path, archived_dir: Path) -> list[T
 
 
 def extractor_version(source: str) -> str:
-    versions = {"claude": "2", "codex": "1"}
+    versions = {"claude": "2", "codex": "1", "cursor": "2"}
     try:
         return versions[source]
     except KeyError as exc:
@@ -381,6 +381,26 @@ def iter_transcript_events(path: str | Path, source: str | None = None) -> Itera
                 )
                 continue
 
+            if source == "cursor":
+                message = obj.get("message") or {}
+                message = message if isinstance(message, dict) else {}
+                content = message.get("content")
+                if not isinstance(content, str):
+                    content = _json_preview(content, 1200) if content is not None else ""
+                timestamp_value = obj.get("timestamp")
+                timestamp = str(timestamp_value or "")
+                sid = str(obj.get("sessionId") or fallback_sid)
+                yield TranscriptEvent(
+                    source=source, obj=obj, session_id=sid,
+                    uuid=str(obj.get("uuid") or f"cursor:{sid}:{byte_offset}"),
+                    cwd=str(obj.get("cwd") or ""), git_branch="",
+                    ts=parse_ts(timestamp_value), timestamp=timestamp,
+                    role=str(message.get("role") or ""),
+                    type=str(obj.get("type") or "cursor_event"), content=content,
+                    byte_offset=byte_offset, byte_len=byte_len, turn_index=turn_index,
+                )
+                continue
+
             payload = obj.get("payload") or {}
             payload = payload if isinstance(payload, dict) else {}
             if obj.get("type") == "session_meta":
@@ -413,7 +433,8 @@ def sanitize_raw(value: Any) -> Any:
     """Recursively remove opaque reasoning ciphertext/signatures from output."""
     if isinstance(value, dict):
         return {key: sanitize_raw(item) for key, item in value.items()
-                if key not in {"encrypted_content", "signature"}}
+                if str(key).casefold() not in {
+                    "encrypted_content", "encryptedcontent", "signature"}}
     if isinstance(value, list):
         return [sanitize_raw(item) for item in value]
     return value
@@ -448,6 +469,8 @@ def read_transcript(path: str, source: str) -> list[dict[str, Any]]:
     """Compatibility materializer; production retrieval uses the streaming iterator."""
     if source == "claude":
         return [event.obj for event in iter_transcript_events(path, source="claude")]
+    if source == "cursor":
+        return [event.obj for event in iter_transcript_events(path, source="cursor")]
     if source != "codex":
         raise ValueError(f"unknown transcript source: {source!r}")
 
@@ -549,6 +572,8 @@ def is_navigable(event: TranscriptEvent) -> bool:
     # are skipped so navigation lands on readable messages/tools/reasoning.
     if event.source == "claude":
         return True
+    if event.source == "cursor":
+        return bool(event.content)
     payload = event.obj.get("payload") or {}
     if (event.obj.get("type") == "response_item" and isinstance(payload, dict)
             and payload.get("type") == "message"):

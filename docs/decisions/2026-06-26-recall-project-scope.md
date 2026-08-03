@@ -20,8 +20,9 @@ the previous global search). The agent passes its raw `cwd`; the server normaliz
 to the repo root and filters the **existing** `cwd` column by a bounded prefix. No
 schema change and no reindexing.
 
-- `scope.repo_root(cwd)` — strips the `/.claude/worktrees/<name>` suffix → all
-  sessions of the repo (main + each worktree) collapse into one scope.
+- `scope.repo_root(cwd)` — strips a nested `/.claude/worktrees/<name>` or
+  `/.worktrees/<name>` suffix → all sessions of the repo (main + each nested
+  worktree) collapse into one scope.
 - `scope.scope_clause(column, root)` — a shared predicate for KNN and FTS (so the logic
   doesn't drift apart): `cwd = root OR cwd LIKE root||'/%' ESCAPE '\'`.
 - KNN: vec0 cannot pre-filter on a joined column → over-fetch candidates
@@ -73,3 +74,18 @@ schema change and no reindexing.
 
 ---
 Implementation: `scope.py` (`repo_root` + `scope_clause`) + wiring into store/retrieve/server; tests `tests/test_scope.py`.
+
+## Follow-up: generic nested worktrees (2026-07-28)
+
+The same normalization now covers the conventional
+`<repo>/.worktrees/<name>` layout. The marker remains segment-anchored:
+lookalikes such as `.worktrees-cache` are not stripped, while a cwd below a
+recognized worktree (`<name>/src/...`) still collapses to the parent repo.
+External worktree stores using other path names remain unchanged because their
+path alone does not establish which checkout should own the scope. A global
+store literally named `.worktrees` is ambiguous and follows the conventional
+nested-layout rule.
+
+Regression coverage includes `repo_root`, `project_label`, SQL-backed scoped
+recall (main checkout plus a sibling nested worktree), and streaming scoped
+`grep`.

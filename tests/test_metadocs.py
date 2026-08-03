@@ -493,6 +493,10 @@ class _FakeStore:
         self.pruned += 1
         return 0
 
+    def refresh_embed_meta(self, fingerprint):
+        self.embed_fp = fingerprint
+        return True
+
     def commit(self):
         pass
 

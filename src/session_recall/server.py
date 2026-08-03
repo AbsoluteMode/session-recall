@@ -40,7 +40,7 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
                   source: str | None = None, start_date: str | None = None,
                   end_date: str | None = None, timezone: str | None = None,
                   on_date: str | None = None) -> dict:
-    """Semantically search past Claude Code and Codex sessions.
+    """Semantically search past Claude Code, Codex and Cursor sessions.
 
     Returns {"anchors": [...ranked anchors...], "degraded": null | str}.
 
@@ -53,7 +53,8 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     scope_cwd: pass your current working directory to restrict results to the
     current project/repo (worktrees collapse to the repo root). Omit it for a
     global, cross-project search.
-    source: optionally restrict to "claude" or "codex"; omit for the shared index.
+    source: optionally restrict to "claude", "codex", or "cursor"; omit for the
+    shared index.
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD). Either may
     be omitted for an open-ended range.
     on_date: shorthand for one local calendar day; cannot be combined with a range.
@@ -93,7 +94,7 @@ def grep(pattern: str, session_id: str | None = None, scope_cwd: str | None = No
 
     scope_cwd: pass your current working directory to restrict the scan to the
     current project/repo; omit for a global scan.
-    source: optionally restrict to "claude" or "codex".
+    source: optionally restrict to "claude", "codex", or "cursor".
     limit: maximum number of matches returned (default 100).
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
     on_date: shorthand for one local calendar day; cannot be combined with a range.
@@ -119,7 +120,7 @@ def recent_sessions(scope_cwd: str | None = None, limit: int = 10,
 
     scope_cwd: pass your current working directory to restrict to the current
     project/repo (worktrees collapse to the repo root); omit for all projects.
-    source: optionally restrict to "claude" or "codex".
+    source: optionally restrict to "claude", "codex", or "cursor".
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
     on_date: shorthand for one local calendar day; cannot be combined with a range.
     timezone: IANA timezone override; omit it to use the user's computer timezone.

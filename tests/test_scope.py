@@ -14,12 +14,33 @@ def test_repo_root_strips_claude_worktree_suffix():
     ) == "/Users/me/myrepo"
 
 
+def test_repo_root_strips_generic_nested_worktree_suffix():
+    assert repo_root(
+        "/Users/me/myrepo/.worktrees/feature-a"
+    ) == "/Users/me/myrepo"
+
+
 def test_repo_root_strips_trailing_slash():
     assert repo_root("/Users/me/myrepo/") == "/Users/me/myrepo"
 
 
 def test_repo_root_worktree_with_trailing_slash():
     assert repo_root("/Users/me/myrepo/.claude/worktrees/foo-123/") == "/Users/me/myrepo"
+
+
+def test_repo_root_normalizes_cwd_below_generic_worktree():
+    assert repo_root(
+        "/Users/me/myrepo/.worktrees/feature-a/src"
+    ) == "/Users/me/myrepo"
+    assert repo_root(
+        "/Users/me/myrepo/.claude/worktrees/feature-a/src/pkg"
+    ) == "/Users/me/myrepo"
+
+
+def test_repo_root_generic_worktree_marker_must_be_a_complete_segment():
+    assert repo_root(
+        "/Users/me/myrepo/.worktrees-cache/feature-a"
+    ) == "/Users/me/myrepo/.worktrees-cache/feature-a"
 
 
 def test_repo_root_empty_is_empty():
@@ -57,6 +78,10 @@ def test_project_label_basename_of_repo_root():
 def test_project_label_collapses_worktree_to_repo():
     # the bug this fixes: a worktree cwd must yield the repo name, not a junk hash
     assert project_label("/Users/me/myrepo/.claude/worktrees/wt-a1b2c3") == "myrepo"
+
+
+def test_project_label_collapses_generic_nested_worktree_to_repo():
+    assert project_label("/Users/me/myrepo/.worktrees/feature-a") == "myrepo"
 
 
 def test_project_label_empty():

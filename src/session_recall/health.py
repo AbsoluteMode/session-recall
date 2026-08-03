@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import config
 from .store import Store
 
 
@@ -52,7 +53,8 @@ def _humanize_lag(seconds: float) -> str:
     return f"{seconds / 86400:.1f} days behind"
 
 
-def check_freshness(store: Store, transcripts: list[Path]) -> Dimension:
+def check_freshness(store: Store, transcripts: list[Path],
+                    source_timestamps: tuple[int | float, ...] = ()) -> Dimension:
     """Gap between the newest transcript on disk and the newest turn in the index.
 
     Deliberately not "when did the index last change": an indexer that runs every
@@ -61,6 +63,7 @@ def check_freshness(store: Store, transcripts: list[Path]) -> Dimension:
     """
     newest_indexed = store.db.execute("SELECT MAX(ts) FROM chunks").fetchone()[0] or 0
     on_disk = [p.stat().st_mtime for p in transcripts if p.exists()]
+    on_disk.extend(float(ts) for ts in source_timestamps if ts > 0)
     if not on_disk:
         return Dimension("Freshness", "AMBER", "no transcripts found on disk",
                          "check the source paths below")
@@ -92,7 +95,8 @@ def check_paths(roots: dict[str, Path]) -> Dimension:
         return Dimension("Sources", "GREEN", ", ".join(sorted(roots)) + " present")
     zone = "RED" if len(missing) == len(roots) else "AMBER"
     return Dimension("Sources", zone, f"missing: {', '.join(sorted(missing))}",
-                     "set CODEX_HOME / SESSION_RECALL_CLAUDE_PROJECTS if these live elsewhere")
+                     "set CODEX_HOME / SESSION_RECALL_CLAUDE_PROJECTS / "
+                     "SESSION_RECALL_CURSOR_DB if these live elsewhere")
 
 
 def check_embedder(embedder) -> Dimension:
@@ -113,6 +117,25 @@ def check_embedder(embedder) -> Dimension:
                      "" if zone == "GREEN" else "slow provider will make indexing crawl")
 
 
+def check_embed_space(store: Store) -> Dimension:
+    """The provider can be healthy while the index belongs to another model."""
+    current = config.embed_fingerprint()
+    stored = store.get_meta("embed_fp")
+    if stored == current:
+        return Dimension("Vector space", "GREEN", current)
+    if stored == "mixed":
+        return Dimension(
+            "Vector space", "RED", "index contains mixed embedding spaces",
+            "run `session-recall index` for all sources before searching")
+    if stored:
+        return Dimension(
+            "Vector space", "RED", f"index: {stored}; configured: {current}",
+            "run `session-recall index` to re-embed with the configured model")
+    return Dimension(
+        "Vector space", "AMBER", "legacy index has no embedding-space marker",
+        "run `session-recall index` once to attest every source")
+
+
 @dataclass(frozen=True)
 class Report:
     dimensions: list[Dimension]
@@ -120,13 +143,15 @@ class Report:
 
 
 def check_all(store: Store, embedder, roots: dict[str, Path],
-              transcripts: list[Path]) -> Report:
+              transcripts: list[Path],
+              source_timestamps: tuple[int | float, ...] = ()) -> Report:
     """Every dimension plus one verdict. The verdict is the worst zone present: a
     single dead dimension makes recall untrustworthy, and averaging would hide it
     behind everything that still works."""
     dims = [
-        check_freshness(store, transcripts),
+        check_freshness(store, transcripts, source_timestamps),
         check_embedder(embedder),
+        check_embed_space(store),
         check_corpus(store),
         check_paths(roots),
     ]

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "session-recall": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; exec session-recall-mcp"
+      ]
+    }
+  }
+}

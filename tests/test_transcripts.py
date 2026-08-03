@@ -212,5 +212,6 @@ def test_claude_passthrough_and_version_validation(tmp_path):
     assert read_transcript(str(path), "claude") == [raw]
     assert extractor_version("claude") == "2"
     assert extractor_version("codex") == "1"
+    assert extractor_version("cursor") == "2"
     with pytest.raises(ValueError, match="unknown transcript source"):
         read_transcript(str(path), "other")
