@@ -26,6 +26,10 @@
   <br />
 
   [English](README.md) · [Русский](docs/README.ru.md) · [Español](README.es-ES.md) <sup>community translation</sup>
+
+  <br />
+
+  [▶ Watch the 35-second demo](assets/session-recall-demo.mp4)
 </div>
 
 ---
