@@ -107,8 +107,12 @@ agent. Budget about two minutes plus the first index run.
 
 ```bash
 pipx install git+https://github.com/AbsoluteMode/session-recall
-session-recall index   # first run walks your whole history; later runs are incremental
+session-recall setup   # one question (interaction language), then the first index
 ```
+
+`setup` is optional sugar — `session-recall index` directly works too, every
+setting has a default. The first run walks your whole history; later runs are
+incremental. Scripted installs: `session-recall setup --lang en --yes`.
 
 That is the whole thing: with no key and no local server, indexing runs on a
 bundled CPU model, downloaded once and picked by your interaction language

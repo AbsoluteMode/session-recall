@@ -99,12 +99,16 @@ def main(argv=None):
     share_cli.add_parser(sub)
     from .metadocs import cli as metadocs_cli
     metadocs_cli.add_parser(sub)
+    from . import onboarding
+    onboarding.add_parser(sub)
     args = parser.parse_args(argv)
 
     if args.cmd == "share":  # no Store: share state lives outside the index DB
         return share_cli.run(args)
     if args.cmd == "metadocs":  # reads the index read-only via plain sqlite3
         return metadocs_cli.run(args)
+    if args.cmd == "setup":  # indexes via a child process (fresh env resolve)
+        return onboarding.run(args)
 
     store = Store(config.DB_PATH)
     if args.cmd == "health":
