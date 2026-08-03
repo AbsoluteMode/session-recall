@@ -156,9 +156,12 @@ class Store:
         WHY: docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md"""
         source_sql = " WHERE source = ?" if source else ""
         params = (source,) if source else ()
+        # cursor rows key on virtual paths (cursor:<composerId>) that never
+        # exist on disk — their reconciliation lives in cursor.index_cursor,
+        # against Cursor's own catalog
         gone = [r[0] for r in self.db.execute(
                 f"SELECT path FROM indexed_files{source_sql}", params).fetchall()
-                if not Path(r[0]).exists()]
+                if not r[0].startswith("cursor:") and not Path(r[0]).exists()]
         for path in gone:
             self.delete_file(path)  # chunks + vec + fts
             self.db.execute("DELETE FROM indexed_files WHERE path = ?", (path,))

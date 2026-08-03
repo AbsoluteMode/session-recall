@@ -65,7 +65,11 @@ def index_metadocs(store: Store, embedder, repo: Path) -> int:
         if entry is None:
             continue          # half-written or foreign file: skip, no marker
         text = f"{entry.title}\n\n{entry.body}"
-        cached = store.embeddings_by_hash(str(path))
+        # reuse only within one embedding space — an fp change invalidates
+        # the signature and must invalidate the by-hash cache too
+        old_sig = store.stored_sig(str(path)) or ""
+        cached = (store.embeddings_by_hash(str(path))
+                  if f":{_embed_fp()}:" in old_sig else {})
         chunk = _chunk(entry, path, text)
         try:
             vec = cached.get(chunk.content_hash)

@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,6 +18,17 @@ CODEX_HOME = Path(
 ).expanduser()
 CODEX_SESSIONS = CODEX_HOME / "sessions"
 CODEX_ARCHIVED_SESSIONS = CODEX_HOME / "archived_sessions"
+
+
+def _default_cursor_db() -> Path:
+    base = (Path.home() / "Library" / "Application Support"
+            if sys.platform == "darwin" else Path.home() / ".config")
+    return base / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+
+
+CURSOR_DB = Path(
+    os.environ.get("SESSION_RECALL_CURSOR_DB") or _default_cursor_db()
+).expanduser()
 
 # Embedding provider — PLUGGABLE. Voyage is the default (and the author's preference),
 # but any provider works: set these env vars (e.g. provider=openai,
