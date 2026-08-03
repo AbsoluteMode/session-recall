@@ -545,6 +545,44 @@ def test_plist_shape(tmp_path):
     assert "PATH" in plist["EnvironmentVariables"]
 
 
+def test_systemd_units_shape(tmp_path):
+    units = schedule.build_units("21:30", tmp_path / "m.log")
+    timer = units["session-recall-metadocs.timer"]
+    service = units["session-recall-metadocs.service"]
+    assert "OnCalendar=*-*-* 21:30:00" in timer
+    assert "Persistent=true" in timer, "a missed run must fire on wake, like launchd"
+    assert "metadocs run" in service
+    assert "Environment=PATH=" in service, "the distiller shells out to the agent CLI"
+    assert str(tmp_path / "m.log") in service
+
+
+def test_systemd_enable_writes_units_and_arms_the_timer(tmp_path, monkeypatch):
+    monkeypatch.setattr(schedule.Path, "home", classmethod(lambda cls: tmp_path))
+    calls = []
+
+    def runner(argv):
+        calls.append(argv)
+        class R: returncode, stderr = 0, ""
+        return R()
+
+    path = schedule.enable("09:15", platform="linux", runner=runner)
+    assert path.exists() and path.name == "session-recall-metadocs.timer"
+    assert (path.parent / "session-recall-metadocs.service").exists()
+    assert ["systemctl", "--user", "daemon-reload"] in calls
+    assert calls[-1][-2:] == ["--now", "session-recall-metadocs.timer"]
+    assert schedule.is_enabled(platform="linux")
+
+    assert schedule.disable(platform="linux", runner=runner) is True
+    assert not schedule.is_enabled(platform="linux")
+    assert not path.exists()
+
+
+def test_unsupported_platform_fails_honestly():
+    with pytest.raises(RuntimeError) as exc:
+        schedule.enable("09:00", platform="win32", runner=lambda argv: None)
+    assert "metadocs run" in str(exc.value), "the error must hand over the manual path"
+
+
 def test_watermarks_survive_reload(tmp_path):
     m = Watermarks(tmp_path / "w.json")
     m.advance("claude", "s", 42)

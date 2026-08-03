@@ -431,7 +431,7 @@ One file per entry, with related PRs and source sessions in the frontmatter.
 ```bash
 session-recall metadocs init ~/meta-docs --from-today   # memory starts now
 session-recall metadocs run                             # one pass now
-session-recall metadocs enable                          # daily launchd job (default 21:00)
+session-recall metadocs enable   # daily job: launchd (macOS) / systemd user timer (Linux)
 session-recall metadocs status
 session-recall metadocs index-history --days 30         # opt-in: distill the past, once
 ```

@@ -103,9 +103,13 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     if cmd == "enable":
-        path = schedule.enable(cfg.daily_at)
+        try:
+            path = schedule.enable(cfg.daily_at)
+        except RuntimeError as exc:
+            print(exc)
+            return 1
         print(f"daily job on, {cfg.daily_at} every day (agent: {path})\n"
-              "a missed run (mac asleep) fires once on wake")
+              "a missed run (machine asleep or off) fires once on wake")
         return 0
 
     if cmd == "disable":
