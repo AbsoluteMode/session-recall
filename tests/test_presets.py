@@ -1,6 +1,6 @@
 # tests/test_presets.py
 import pytest
-from session_recall.config import resolve_embed, PRESETS
+from session_recall.config import builtin_preset_for, resolve_embed, PRESETS
 
 
 def _never_probed():
@@ -62,7 +62,50 @@ def test_an_api_key_suppresses_the_probe_entirely():
     assert s.rerank_provider == "voyage"
 
 
-def test_falls_back_to_voyage_when_nothing_is_running():
+def test_nothing_at_all_falls_back_to_the_bundled_model():
+    """No key, no preset, no local server used to mean 'fail on every request'.
+    Out of the box must WORK: the bundled ONNX model runs on CPU with no
+    account anywhere — and with no language chosen, multilingual is the one
+    answer that is never wrong."""
     s = resolve_embed({}, probe=lambda: None)
+    assert s.provider == "builtin"
+    assert s.model == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    assert s.rerank_provider == "none"
+
+
+def test_the_interaction_language_picks_the_builtin_flavor():
+    """A 70MB English specialist beats a 220MB generalist on English text —
+    but only the user knows their language, so onboarding asks once and the
+    answer steers the default."""
+    en = resolve_embed({"SESSION_RECALL_LANG": "en"}, probe=lambda: None)
+    assert en.model == "BAAI/bge-small-en-v1.5" and en.dim == 384
+    zh = resolve_embed({"SESSION_RECALL_LANG": "zh"}, probe=lambda: None)
+    assert zh.model == "BAAI/bge-small-zh-v1.5" and zh.dim == 512
+    ru = resolve_embed({"SESSION_RECALL_LANG": "ru"}, probe=lambda: None)
+    assert "multilingual" in ru.model
+
+
+def test_builtin_alias_resolves_by_language():
+    """`SESSION_RECALL_EMBED=builtin` must be a valid answer even though the
+    real preset name depends on the language — the user says WHAT, config
+    figures out WHICH."""
+    s = resolve_embed({"SESSION_RECALL_EMBED": "builtin",
+                       "SESSION_RECALL_LANG": "en"}, probe=_never_probed)
+    assert s.model == "BAAI/bge-small-en-v1.5"
+
+
+def test_an_explicit_env_dict_never_reads_the_settings_file(tmp_path, monkeypatch):
+    """A passed-in env is the caller's whole world — the live settings file
+    must not leak into it, or tests and scripted calls stop being hermetic."""
+    from session_recall import config
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"lang": "zh"}')
+    monkeypatch.setattr(config, "SETTINGS_PATH", settings)
+    s = resolve_embed({}, probe=lambda: None)
+    assert s.model == PRESETS[builtin_preset_for(None)].model  # multi, not zh
+    assert config.user_lang() == "zh", "the live path DOES read the file"
+
+
+def test_a_key_still_beats_the_bundled_fallback():
+    s = resolve_embed({"VOYAGE_API_KEY": "pa-x"}, probe=_never_probed)
     assert s.provider == "voyage"
-    assert s.model == "voyage-4-large"

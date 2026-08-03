@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 from dataclasses import dataclass
@@ -6,6 +7,7 @@ from urllib.parse import urlparse
 
 DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "session-recall"
 DB_PATH = DATA_DIR / "index.db"
+SETTINGS_PATH = DATA_DIR / "settings.json"   # written by onboarding, human-editable
 CLAUDE_PROJECTS = Path(
     os.environ.get("SESSION_RECALL_CLAUDE_PROJECTS")
     or (Path.home() / ".claude" / "projects")
@@ -55,7 +57,55 @@ PRESETS: dict[str, EmbedSettings] = {
         provider="openai-compatible", model="text-embedding-nomic-embed-text-v1.5",
         dim=768, base_url="http://127.0.0.1:1234/v1",
         send_dimensions=False, rerank_provider="none", rerank_model=None),
+    # Bundled ONNX models (fastembed): no key, no server — the zero-setup
+    # default. One per interaction language, because a 70MB English specialist
+    # beats a 220MB generalist on English and loses everywhere else; the
+    # language is asked once at onboarding (SESSION_RECALL_LANG or the
+    # settings file), and "multi" safely covers everyone who never answered.
+    "builtin-en": EmbedSettings(
+        provider="builtin", model="BAAI/bge-small-en-v1.5", dim=384,
+        base_url=None, send_dimensions=False,
+        rerank_provider="none", rerank_model=None),
+    "builtin-zh": EmbedSettings(
+        provider="builtin", model="BAAI/bge-small-zh-v1.5", dim=512,
+        base_url=None, send_dimensions=False,
+        rerank_provider="none", rerank_model=None),
+    "builtin-multi": EmbedSettings(
+        provider="builtin",
+        model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        dim=384, base_url=None, send_dimensions=False,
+        rerank_provider="none", rerank_model=None),
 }
+
+
+def user_lang(env: dict | None = None) -> str | None:
+    """The interaction language, chosen once at project onboarding.
+
+    With no explicit env dict this reads the live environment and falls back
+    to the settings file; a passed-in env is taken as the whole world, so
+    tests and callers stay hermetic."""
+    live = env is None
+    env = os.environ if live else env
+    lang = (env.get("SESSION_RECALL_LANG") or "").strip().lower()
+    if lang:
+        return lang
+    if live:
+        try:
+            stored = (json.loads(SETTINGS_PATH.read_text()).get("lang") or "")
+            return stored.strip().lower() or None
+        except (OSError, ValueError):
+            return None
+    return None
+
+
+def builtin_preset_for(lang: str | None) -> str:
+    """en and zh get their specialist small model; every other answer — and
+    no answer at all — gets the multilingual one, which is never wrong."""
+    if lang and lang.startswith("en"):
+        return "builtin-en"
+    if lang and lang.startswith("zh"):
+        return "builtin-zh"
+    return "builtin-multi"
 
 _PROBE_TIMEOUT_S = 0.3
 
@@ -77,15 +127,21 @@ def _probe_local_server() -> str | None:
 def resolve_embed(env: dict | None = None, probe=None) -> EmbedSettings:
     """Turn the environment into one coherent embedding setup.
 
-    `SESSION_RECALL_EMBED=<preset>` is the short path. With no preset and no Voyage
-    key, a local server that is already running beats defaulting to a provider that
-    is certain to reject us. Individual SESSION_RECALL_EMBED_* variables still win,
-    so a preset never blocks a custom endpoint.
+    `SESSION_RECALL_EMBED=<preset>` is the short path (`builtin` resolves to the
+    right bundled model for the interaction language). With no preset: a Voyage
+    key wins; a local server that is already running is next; and with nothing
+    at all, the bundled ONNX model runs — out of the box always works, never a
+    provider that is certain to reject us. Individual SESSION_RECALL_EMBED_*
+    variables still win, so a preset never blocks a custom endpoint.
     """
-    env = os.environ if env is None else env
+    live = env is None
+    env = os.environ if live else env
     probe = probe or _probe_local_server
+    lang = user_lang(None if live else env)
 
     name = (env.get("SESSION_RECALL_EMBED") or "").strip().lower()
+    if name == "builtin":
+        name = builtin_preset_for(lang)
     if name:
         if name not in PRESETS:
             raise ValueError(
@@ -95,7 +151,7 @@ def resolve_embed(env: dict | None = None, probe=None) -> EmbedSettings:
         base = PRESETS["voyage"]
     else:
         detected = probe()
-        base = PRESETS[detected] if detected else PRESETS["voyage"]
+        base = PRESETS[detected] if detected else PRESETS[builtin_preset_for(lang)]
 
     dim = env.get("SESSION_RECALL_EMBED_DIM")
     return EmbedSettings(

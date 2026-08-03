@@ -29,6 +29,9 @@ dependencies = [
     "mcp>=1.2.0,<2",
     "pynacl>=1.5",
     "pysqlite3>=0.6.0; sys_platform == 'darwin'",
+    # the zero-setup default path (bundled ONNX embeddings) must work on a
+    # bare install, so like voyageai this is a direct dependency, not an extra
+    "fastembed>=0.8",
 ]
 
 [project.optional-dependencies]
