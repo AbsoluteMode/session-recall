@@ -60,6 +60,47 @@ class VoyageEmbedder:
         return self.client.embed([text], model=self.model, input_type="query").embeddings[0]
 
 
+def _fastembed_model(model_name: str):
+    """Constructing the bundled model, isolated so tests can stand in for it
+    without downloading anything."""
+    import warnings
+    from fastembed import TextEmbedding
+    with warnings.catch_warnings():
+        # fastembed warns that multilingual-MiniLM now uses mean pooling — a
+        # migration note for pre-0.6 indexes. Our fingerprint was built WITH
+        # mean pooling, so the note is pure noise on every process start.
+        warnings.simplefilter("ignore", UserWarning)
+        # fastembed's default cache is the system tmp dir, which macOS prunes —
+        # the model would be re-downloaded after every cleanup. Keep it next
+        # to the index instead.
+        return TextEmbedding(model_name=model_name,
+                             cache_dir=str(config.DATA_DIR / "models"))
+
+
+class BuiltinEmbedder:
+    """Bundled ONNX embeddings (fastembed) — the zero-setup default: no key,
+    no server, CPU inference. The model is fetched from HuggingFace once on
+    first use (70–220MB depending on language preset), then runs offline.
+    Lazy like the API clients, so constructing costs nothing."""
+    def __init__(self, model: str | None = None):
+        self.model = model or config.EMBED_MODEL
+        self._m = None
+
+    @property
+    def m(self):
+        if self._m is None:
+            self._m = _fastembed_model(self.model)
+        return self._m
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[float(x) for x in v] for v in self.m.embed(texts)]
+
+    def embed_query(self, text: str) -> list[float]:
+        # query_embed applies the model's query-side prompt where one exists
+        # (bge instruction prefixes and the like) — .embed() would not
+        return [float(x) for x in next(iter(self.m.query_embed(text)))]
+
+
 def _openai_client(**kwargs):
     """Constructing the SDK, isolated so tests can stand in for it without a network."""
     from openai import OpenAI
@@ -117,6 +158,8 @@ def make_embedder(provider: str | None = None, model: str | None = None,
         return VoyageEmbedder(model=model)
     if provider in ("openai", "openai-compatible"):
         return OpenAIEmbedder(model=model, dim=dim)
+    if provider == "builtin":
+        return BuiltinEmbedder(model=model)
     if provider == "fake":
         return FakeEmbedder(dim=dim)
     raise ValueError(f"unknown embed provider: {provider!r} (set SESSION_RECALL_EMBED_PROVIDER)")

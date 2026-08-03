@@ -72,3 +72,44 @@ def test_openai_embedder_reaches_a_local_endpoint_without_a_key(monkeypatch):
     embed.OpenAIEmbedder(base_url="http://127.0.0.1:11434/v1").embed_query("hi")
     assert seen["base_url"] == "http://127.0.0.1:11434/v1"
     assert seen["api_key"], "SDK requires a non-empty key even when the server ignores it"
+
+
+class _RecordingModel:
+    """Stands in for fastembed.TextEmbedding: no download, no ONNX runtime."""
+    def __init__(self):
+        self.doc_calls, self.query_calls = [], []
+
+    def embed(self, texts):
+        self.doc_calls.append(list(texts))
+        return ([0.5] * 4 for _ in texts)          # generator, like the real one
+
+    def query_embed(self, text):
+        self.query_calls.append(text)
+        yield [0.25] * 4
+
+
+def test_builtin_embedder_is_lazy_and_uses_the_query_path(monkeypatch):
+    """The bundled model must not download at construction time (the factory
+    builds embedders unconditionally), and queries must go through
+    query_embed — that is where models like bge apply their query prefix,
+    which .embed() would silently skip."""
+    from session_recall import embed
+    made = []
+    model = _RecordingModel()
+    monkeypatch.setattr(embed, "_fastembed_model",
+                        lambda name: made.append(name) or model)
+
+    e = embed.BuiltinEmbedder(model="BAAI/bge-small-en-v1.5")
+    assert made == [], "constructing must not touch the model"
+
+    docs = e.embed_documents(["a", "b"])
+    assert made == ["BAAI/bge-small-en-v1.5"]
+    assert docs == [[0.5] * 4, [0.5] * 4] and isinstance(docs[0][0], float)
+
+    q = e.embed_query("find it")
+    assert model.query_calls == ["find it"] and q == [0.25] * 4
+
+
+def test_make_embedder_knows_builtin(monkeypatch):
+    from session_recall import embed
+    assert isinstance(embed.make_embedder("builtin"), embed.BuiltinEmbedder)

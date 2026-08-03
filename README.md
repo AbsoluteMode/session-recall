@@ -110,9 +110,11 @@ pipx install git+https://github.com/AbsoluteMode/session-recall
 session-recall index   # first run walks your whole history; later runs are incremental
 ```
 
-That is the whole thing if you have a local embedding server running — see
-[Embedding providers](#embedding-providers) for the free local setup. For hosted Voyage
-embeddings instead, export a key first:
+That is the whole thing: with no key and no local server, indexing runs on a
+bundled CPU model, downloaded once and picked by your interaction language
+(`SESSION_RECALL_LANG=en|zh|…`, multilingual when unset) — see
+[Embedding providers](#embedding-providers) for the options. Hosted Voyage
+embeddings rank noticeably better; to use them instead, export a key first:
 
 ```bash
 export VOYAGE_API_KEY=...   # voyageai.com; put the line in your shell profile
@@ -217,10 +219,20 @@ dimension and reranker together, because those four are not independent choices:
 | `ollama` | **local, free** | `nomic-embed-text` | 768 | — |
 | `lmstudio` | **local, free** | `nomic-embed-text-v1.5` | 768 | — |
 | `openai` | hosted, needs a key | `text-embedding-3-large` | 1024 | — |
+| `builtin-en` | **bundled, free** | `bge-small-en-v1.5` | 384 | — |
+| `builtin-zh` | **bundled, free** | `bge-small-zh-v1.5` | 512 | — |
+| `builtin-multi` | **bundled, free** | `paraphrase-multilingual-MiniLM-L12-v2` | 384 | — |
 
-With no preset set, session-recall picks Voyage when `VOYAGE_API_KEY` is present, and
-otherwise probes for a local server already listening — better than defaulting to a
-provider that is guaranteed to reject the request. With a key configured, no probe runs.
+With no preset set, session-recall picks Voyage when `VOYAGE_API_KEY` is
+present, then probes for a local server already listening, and otherwise runs
+the **bundled ONNX model** — out of the box always works. The bundled flavor
+follows the interaction language you choose at onboarding
+(`SESSION_RECALL_LANG=en|zh|…`; a small English or Chinese specialist,
+multilingual for every other answer and for no answer at all — `builtin` as a
+preset name resolves the same way). First use downloads the model once into
+the data dir (70–240MB), CPU inference from then on; ranking is noticeably
+coarser than hosted Voyage — a starting point, not the ceiling. With a key
+configured, no probe runs.
 
 **Free and local, start to finish:**
 
