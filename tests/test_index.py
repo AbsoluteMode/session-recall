@@ -266,3 +266,14 @@ def test_reindex_changed_file_does_not_accumulate_duplicate_rows(tmp_path):
     assert total == 3, f"duplicate accumulation: {total} chunk rows (expected 3)"
     assert vec == 3 and fts == 3, f"vec/fts out of sync with chunks: vec={vec} fts={fts}"
     store.close()
+
+
+def test_clean_pass_records_the_embed_space(tmp_path):
+    """After a clean pass the index knows which vector space it holds — the
+    marker search uses to refuse mixing after a same-dim model swap."""
+    from session_recall import config
+    projects = _corpus(tmp_path)
+    store = Store(tmp_path / "i.db")
+    index_corpus(store, FakeEmbedder(), projects)
+    assert store.get_meta("embed_fp") == config.embed_fingerprint()
+    store.close()

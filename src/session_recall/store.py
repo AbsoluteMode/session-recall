@@ -68,6 +68,9 @@ class Store:
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS indexed_files("
             "path TEXT PRIMARY KEY, sig TEXT, source TEXT NOT NULL DEFAULT 'claude')")
+        # index-wide facts, e.g. which embedding space the vectors live in —
+        # per-file sigs drive re-embedding, this one lets SEARCH refuse to mix
+        self.db.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
         indexed_cols = {row[1] for row in self.db.execute("PRAGMA table_info(indexed_files)")}
         if "source" not in indexed_cols:
             self.db.execute(
@@ -278,6 +281,16 @@ class Store:
             "SELECT text FROM chunks WHERE session_id = ? AND role = 'user' "
             f"{source_sql} ORDER BY turn_index LIMIT 1", params).fetchone()
         return row[0] if row else ""
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        # Not committed here — rides the caller's transaction, like mark_indexed
+        self.db.execute(
+            "INSERT INTO meta(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
     def mark_indexed(self, path: str, sig: str, source: str = "claude"):
         # Not committed here — joins the caller's per-file transaction, so the
