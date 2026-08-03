@@ -2,6 +2,7 @@
 import json
 import time
 from collections import deque
+from . import config
 from .store import Store
 from .embed import Embedder
 from .rerank import Reranker
@@ -72,21 +73,31 @@ class Recall:
         order: list[int] = []
         dist: dict[int, float | None] = {}
         degraded: str | None = None
-        try:
-            qv = self.embedder.embed_query(query)
-            for cid, d in self.store.knn(
-                    qv, candidates, scope_root=root, source=source,
-                    start_ts=start_ts, end_ts=end_ts):
-                order.append(cid)
-                dist[cid] = d
-        except Exception as exc:
-            # WHY: docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md
-            # Embedding unavailable -> FTS-only. Never hard-fail: keyword hits still
-            # beat nothing. But say so — a silent fallback looks identical to a
-            # healthy search that found little, and the caller stops trusting recall
-            # instead of fixing the embedder.
-            degraded = (f"fts-only: embeddings unavailable, semantic ranking is off — "
-                        f"only literal word matches are returned ({type(exc).__name__}: {exc})")
+        stored_fp = self.store.get_meta("embed_fp")
+        if stored_fp and stored_fp != config.embed_fingerprint():
+            # A same-dim model swap passes the schema check but puts the query
+            # in a different vector space than the corpus — matches would be
+            # silent noise. Refuse the mix: words still work, `index` heals it.
+            degraded = (f"embedder changed: the index was built with {stored_fp}, "
+                        f"the current config is {config.embed_fingerprint()} — "
+                        "semantic ranking is off until `session-recall index` "
+                        "re-embeds")
+        else:
+            try:
+                qv = self.embedder.embed_query(query)
+                for cid, d in self.store.knn(
+                        qv, candidates, scope_root=root, source=source,
+                        start_ts=start_ts, end_ts=end_ts):
+                    order.append(cid)
+                    dist[cid] = d
+            except Exception as exc:
+                # WHY: docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md
+                # Embedding unavailable -> FTS-only. Never hard-fail: keyword hits still
+                # beat nothing. But say so — a silent fallback looks identical to a
+                # healthy search that found little, and the caller stops trusting recall
+                # instead of fixing the embedder.
+                degraded = (f"fts-only: embeddings unavailable, semantic ranking is off — "
+                            f"only literal word matches are returned ({type(exc).__name__}: {exc})")
         for cid in self.store.fts(
                 query, candidates, scope_root=root, source=source,
                 start_ts=start_ts, end_ts=end_ts):

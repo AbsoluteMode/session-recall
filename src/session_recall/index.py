@@ -12,7 +12,7 @@ def _embed_fp() -> str:
     # Which embedding space the vectors live in. Same-dim provider/model swaps
     # produce incompatible spaces, so this must invalidate files AND the reuse
     # cache. WHY: docs/decisions/2026-07-02-post-review-hardening.md
-    return f"{config.EMBED_PROVIDER}/{config.EMBED_MODEL}/{config.EMBED_DIM}"
+    return config.embed_fingerprint()
 
 def _file_sig(path: Path, source: str = "claude") -> str:
     st = path.stat()
@@ -183,4 +183,10 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
     if failed:
         print(f"session-recall: {len(failed)} file(s) failed to index (will retry "
               f"next run):\n  " + "\n  ".join(failed[:10]), file=sys.stderr)
+    else:
+        # The index-wide space marker moves only after a CLEAN pass: a failed
+        # file keeps its rolled-back old-space vectors, and search must keep
+        # treating the corpus as mixed until a full run heals it.
+        store.set_meta("embed_fp", _embed_fp())
+        store.commit()
     return new_count

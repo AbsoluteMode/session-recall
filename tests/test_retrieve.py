@@ -568,3 +568,63 @@ def test_recall_search_skips_chunk_deleted_after_candidate_selection(tmp_path):
     r.store.knn = knn_then_delete
     hits = r.recall_search("cache embeddings", k=5)  # must not raise
     assert all(a.uuid for a in hits)
+
+
+def _chunk(text):
+    from session_recall.models import Chunk
+    return Chunk(session_id="s", uuid="u1", role="user", text=text,
+                 project="p", cwd="/p", git_branch="main", ts=1,
+                 file_path="/p/f.jsonl", byte_offset=0, byte_len=len(text),
+                 turn_index=0, content_hash="h1", source="claude")
+
+
+def test_embedder_swap_degrades_instead_of_mixing_spaces(tmp_path, monkeypatch):
+    """A same-dim model swap passes the schema check, so without the meta
+    guard the query lands in a different vector space than the corpus and the
+    ranking is silent noise. The guard must refuse to mix: no embed call,
+    words still work, and the note names both spaces."""
+    from session_recall import config
+    from session_recall.embed import FakeEmbedder
+    from session_recall.retrieve import Recall
+    from session_recall.store import Store
+    from session_recall.models import Chunk
+
+    store = Store(tmp_path / "i.db")
+    store.add(_chunk("the relay transport was rebuilt"),
+              FakeEmbedder().embed_query("the relay transport was rebuilt"))
+    store.commit()
+    store.set_meta("embed_fp", "voyage/old-model/1024")
+    store.commit()
+
+    class NeverEmbed(FakeEmbedder):
+        def embed_query(self, text):
+            raise AssertionError("mixed-space KNN must not run at all")
+
+    monkeypatch.setattr(config, "EMBED_MODEL", "brand-new-model")
+    res = Recall(store, NeverEmbed()).recall_search("relay transport")
+    assert res.degraded and "embedder changed" in res.degraded
+    assert "voyage/old-model/1024" in res.degraded
+    assert res, "FTS must still return the word match"
+    assert all(a.score is None for a in res)
+    store.close()
+
+
+def test_matching_fingerprint_keeps_the_vector_path(tmp_path):
+    from session_recall import config
+    from session_recall.embed import FakeEmbedder
+    from session_recall.retrieve import Recall
+    from session_recall.store import Store
+    from session_recall.models import Chunk
+
+    store = Store(tmp_path / "i.db")
+    e = FakeEmbedder()
+    store.add(_chunk("the relay transport was rebuilt"),
+              e.embed_query("the relay transport was rebuilt"))
+    store.commit()
+    store.set_meta("embed_fp", config.embed_fingerprint())
+    store.commit()
+
+    res = Recall(store, e).recall_search("the relay transport was rebuilt")
+    assert res.degraded is None
+    assert res and res[0].score is not None
+    store.close()

@@ -177,3 +177,10 @@ EMBED_SEND_DIMENSIONS = _EMBED.send_dimensions
 # KNN + FTS only (not every embedding provider ships a reranker).
 RERANK_PROVIDER = _EMBED.rerank_provider
 RERANK_MODEL = _EMBED.rerank_model
+
+
+def embed_fingerprint() -> str:
+    """Which embedding space vectors live in right now. Read at call time (not
+    frozen above) so tests and long processes see configuration changes. The
+    format is part of file signatures — change it and every file re-embeds."""
+    return f"{EMBED_PROVIDER}/{EMBED_MODEL}/{EMBED_DIM}"
