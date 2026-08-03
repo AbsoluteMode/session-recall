@@ -46,8 +46,11 @@ session-recall = "session_recall.cli:main"
 session-recall-mcp = "session_recall.server:main"
 
 [tool.pytest.ini_options]
-markers = ["live: hits real Voyage API (needs VOYAGE_API_KEY); excluded by default"]
-addopts = "-m 'not live'"
+markers = [
+    "live: hits real Voyage API (needs VOYAGE_API_KEY); excluded by default",
+    "smoke: downloads real bundled models, CPU inference; excluded by default",
+]
+addopts = "-m 'not live and not smoke'"
 
 [project.urls]
 Homepage = "https://github.com/AbsoluteMode/session-recall"
