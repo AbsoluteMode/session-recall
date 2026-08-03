@@ -1,6 +1,6 @@
 {
   "name": "session-recall",
   "version": "0.5.0",
-  "description": "Shared semantic recall over local Claude Code and Codex session history. Bundles MCP search tools, a deep-recall subagent, a trigger skill, an agent-driven setup skill (/session-recall:setup), and a background freshness hook.",
-  "author": { "name": "max" }
+  "description": "Shared semantic recall over local Claude Code, Codex, and Cursor history. Bundles MCP search tools, deep recall, guided setup, and a background freshness hook.",
+  "author": { "name": "Max Butorin" }
 }

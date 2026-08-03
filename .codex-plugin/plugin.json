@@ -1,9 +1,9 @@
 {
   "name": "session-recall",
-  "version": "0.3.0+codex.20260716100453",
-  "description": "Shared semantic recall over local Claude Code and Codex session history.",
+  "version": "0.5.0",
+  "description": "Shared semantic recall over local Claude Code, Codex, and Cursor history, with durable deep navigation and guided setup.",
   "author": {
-    "name": "max"
+    "name": "Max Butorin"
   },
   "homepage": "https://github.com/AbsoluteMode/session-recall",
   "repository": "https://github.com/AbsoluteMode/session-recall",
@@ -13,7 +13,8 @@
     "recall",
     "sessions",
     "claude-code",
-    "codex"
+    "codex",
+    "cursor"
   ],
   "skills": "./skills/",
   "mcpServers": {
@@ -27,9 +28,9 @@
   },
   "interface": {
     "displayName": "Session Recall",
-    "shortDescription": "Recall work from Claude Code and Codex.",
-    "longDescription": "Search one local semantic index of your Claude Code and Codex sessions, then drill into the original conversational trace.",
-    "developerName": "max",
+    "shortDescription": "Recall work from Claude Code, Codex, and Cursor.",
+    "longDescription": "Search one local semantic index of your Claude Code, Codex, and Cursor sessions, then drill into the original conversational trace.",
+    "developerName": "Max Butorin",
     "category": "Productivity",
     "capabilities": [
       "Read"

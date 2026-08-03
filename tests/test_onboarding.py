@@ -17,6 +17,7 @@ def settings(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "cl")
     monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "cx")
     monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "cxa")
+    monkeypatch.setattr(config, "CURSOR_DB", tmp_path / "cursor.vscdb")
     return path
 
 
@@ -65,3 +66,11 @@ def test_footprint_counts_transcripts(settings, tmp_path):
     (d / "b.jsonl").write_text("y" * 50)
     files, size = onboarding._transcript_footprint()
     assert files == 2 and size == 150
+
+
+def test_footprint_includes_cursor_database_and_live_wal(settings, tmp_path):
+    db = tmp_path / "cursor.vscdb"
+    db.write_bytes(b"d" * 100)
+    db.with_name("cursor.vscdb-wal").write_bytes(b"w" * 50)
+    files, size = onboarding._transcript_footprint()
+    assert files == 1 and size == 150

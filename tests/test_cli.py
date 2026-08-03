@@ -12,6 +12,7 @@ def test_cli_index_then_search(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "projects")
     monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
     monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
+    monkeypatch.setattr(config, "CURSOR_DB", tmp_path / "no-cursor.db")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")  # keep the live metadocs config out of the test
     monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
@@ -31,6 +32,7 @@ def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "projects")
     monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
     monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
+    monkeypatch.setattr(config, "CURSOR_DB", tmp_path / "no-cursor.db")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")  # keep the live metadocs config out of the test
     monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
@@ -60,6 +62,35 @@ def test_cli_recent_grep_prune(tmp_path, monkeypatch, capsys):
     cli.main(["prune"])
     out = capsys.readouterr().out
     assert "pruned 0" in out
+
+
+def test_cli_cursor_schema_failure_keeps_other_sources(tmp_path, monkeypatch, capsys):
+    """Cursor is a private schema. A breaking upgrade reports failure while
+    Claude/Codex commits from the same run remain available."""
+    proj = tmp_path / "projects" / "-Users-me-proj"
+    proj.mkdir(parents=True)
+    shutil.copy("tests/fixtures/session_a.jsonl", proj / "session_a.jsonl")
+    cursor_db = tmp_path / "cursor.vscdb"
+    import sqlite3
+    sqlite3.connect(cursor_db).close()  # incompatible: no cursorDiskKV
+
+    monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "projects")
+    monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
+    monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-codex-archive")
+    monkeypatch.setattr(config, "CURSOR_DB", cursor_db)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "cli.db")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
+
+    assert cli.main(["index"]) == 1
+    captured = capsys.readouterr()
+    assert "Cursor indexing failed" in captured.err
+
+    from session_recall.store import Store
+    store = Store(config.DB_PATH)
+    assert store.db.execute(
+        "SELECT COUNT(*) FROM chunks WHERE source='claude'").fetchone()[0] > 0
+    store.close()
 
 
 def test_cli_module_entrypoint_runs_main():

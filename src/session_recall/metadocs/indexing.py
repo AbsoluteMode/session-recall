@@ -25,7 +25,7 @@ _SIG_TAG = "metadocs-v1"
 
 def _embed_fp() -> str:
     from .. import config
-    return f"{config.EMBED_PROVIDER}/{config.EMBED_MODEL}/{config.EMBED_DIM}"
+    return config.embed_fingerprint()
 
 
 def _entry_files(repo: Path):
@@ -84,4 +84,6 @@ def index_metadocs(store: Store, embedder, repo: Path) -> int:
             store.rollback()
             raise
     store.prune_deleted(source="metadocs")
+    store.refresh_embed_meta(_embed_fp())
+    store.commit()
     return count

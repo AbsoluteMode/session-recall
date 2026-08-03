@@ -1,0 +1,35 @@
+{
+  "name": "session-recall",
+  "displayName": "Session Recall",
+  "version": "0.5.0",
+  "minClientVersions": {
+    "cursor": "2.5.0"
+  },
+  "description": "Shared semantic recall over local Claude Code, Codex, and Cursor history, with durable deep navigation and guided setup.",
+  "author": {
+    "name": "Max Butorin"
+  },
+  "homepage": "https://github.com/AbsoluteMode/session-recall",
+  "repository": "https://github.com/AbsoluteMode/session-recall",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "recall",
+    "sessions",
+    "claude-code",
+    "codex",
+    "cursor",
+    "mcp"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "memory",
+    "semantic-search",
+    "local-first"
+  ],
+  "commands": "./commands/",
+  "agents": "./agents/",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks-cursor.json",
+  "mcpServers": "./mcp.json"
+}

@@ -25,7 +25,8 @@ def _date_range(args, parser: argparse.ArgumentParser) -> tuple[int | None, int 
         parser.error(str(exc))
 
 
-_SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex"}
+_SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor",
+                  "metadocs": "meta docs"}
 _ZONE_MARKS = {"GREEN": "ok  ", "AMBER": "warn", "RED": "FAIL"}
 
 
@@ -34,11 +35,26 @@ def _run_health(store: Store) -> int:
     timer or monitor can act on it without parsing the text."""
     from .health import check_all
 
-    roots = {"claude": config.CLAUDE_PROJECTS, "codex": config.CODEX_SESSIONS}
+    roots = {
+        "claude": config.CLAUDE_PROJECTS,
+        "codex": config.CODEX_SESSIONS,
+        "cursor": config.CURSOR_DB,
+    }
     transcripts = [p for root in (config.CLAUDE_PROJECTS, config.CODEX_SESSIONS,
                                   config.CODEX_ARCHIVED_SESSIONS)
                    if Path(root).is_dir() for p in Path(root).rglob("*.jsonl")]
-    report = check_all(store, make_embedder(), roots, transcripts)
+    source_timestamps: tuple[int | float, ...] = ()
+    if Path(config.CURSOR_DB).is_file():
+        from .cursor import CursorSchemaError, latest_activity
+        try:
+            source_timestamps = (latest_activity(config.CURSOR_DB),)
+        except CursorSchemaError:
+            # Sources already reports whether the DB exists.  A schema problem
+            # is reported precisely by `index`; health must not crash and must
+            # not use the global DB mtime as a fake conversation timestamp.
+            pass
+    report = check_all(
+        store, make_embedder(), roots, transcripts, source_timestamps)
 
     width = max(len(d.name) for d in report.dimensions)
     for d in report.dimensions:
@@ -53,7 +69,7 @@ def _run_health(store: Store) -> int:
 def _print_corpus_summary(store: Store) -> None:
     """Say what the user now has. A raw chunk count reads as noise right after
     install — the interesting facts are how far back the memory reaches and that
-    both engines feed it."""
+    every configured source feeds it."""
     s = corpus_summary(store)
     if not s["sessions"]:
         return
@@ -112,6 +128,7 @@ def main(argv=None):
         return onboarding.run(args)
 
     store = Store(config.DB_PATH)
+    exit_code = 0
     if args.cmd == "health":
         return _run_health(store)
     if args.cmd == "index":
@@ -128,9 +145,20 @@ def main(argv=None):
         print(f"indexed {n} chunks from changed transcripts")
         if args.source in {"all", "cursor"}:
             from .cursor import index_cursor
-            c = index_cursor(store, embedder)
-            if c:
-                print(f"indexed {c} cursor session(s)")
+            try:
+                c = index_cursor(store, embedder)
+            except Exception as exc:
+                # Cursor's private SQLite schema can change independently of
+                # us. Claude/Codex commits from the preceding stage remain
+                # valid, but the overall command is honestly unsuccessful and
+                # leaves the global vector-space marker mixed.
+                import sys
+                print(f"session-recall: Cursor indexing failed; other sources "
+                      f"were kept ({type(exc).__name__}: {exc})", file=sys.stderr)
+                exit_code = 1
+            else:
+                if c:
+                    print(f"indexed {c} cursor session(s)")
         # meta docs entries ride the same index (source="metadocs") whenever
         # the feature is configured; the SessionStart hook keeps them fresh
         if args.source == "all":
@@ -169,6 +197,7 @@ def main(argv=None):
     elif args.cmd == "prune":
         print(f"pruned {store.prune_deleted(source=args.source)} deleted transcript(s)")
     store.close()
+    return exit_code
 
 
 if __name__ == "__main__":

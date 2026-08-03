@@ -18,7 +18,8 @@ pipx install git+https://github.com/AbsoluteMode/session-recall
 
 Plugin (gives the agent recall tools + auto-fresh index): in Claude Code run
 `/plugin marketplace add AbsoluteMode/session-recall` then
-`/plugin install session-recall`; other MCP hosts register
+`/plugin install session-recall`; in Cursor add this repository as a plugin
+marketplace and run `/add-plugin session-recall`; other MCP hosts register
 `session-recall-mcp` directly.
 
 ## 1. Three questions (ask in chat, one message)

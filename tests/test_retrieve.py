@@ -203,6 +203,29 @@ def test_recall_search_scope_normalizes_worktree(tmp_path):
     store.close()
 
 
+def test_recall_search_scope_normalizes_generic_nested_worktree(tmp_path):
+    """Generic nested worktrees share scoped history with the main checkout
+    and sibling worktrees, without leaking another repository."""
+    store = Store(tmp_path / "generic-wt.db")
+    store.add(*_scoped_chunk("main", "alpha main", "/Users/me/repoA", 0))
+    store.add(*_scoped_chunk(
+        "sibling", "alpha sibling", "/Users/me/repoA/.worktrees/feature-b", 1))
+    store.add(*_scoped_chunk("other", "alpha other", "/Users/me/repoB", 2))
+    qvec = [0.0] * 1024
+    qvec[0] = 1.0
+
+    class _QEmb(FakeEmbedder):
+        def embed_query(self, text):
+            return qvec
+
+    scoped = Recall(store, _QEmb(), None).recall_search(
+        "anything", k=10,
+        scope_cwd="/Users/me/repoA/.worktrees/feature-a/src/package")
+
+    assert {hit.uuid for hit in scoped} == {"main", "sibling"}
+    store.close()
+
+
 def test_grep_scoped_to_repo(tmp_path):
     fa = tmp_path / "a.jsonl"
     fa.write_text('{"type":"user","uuid":"u1","sessionId":"sa",'
@@ -219,6 +242,38 @@ def test_grep_scoped_to_repo(tmp_path):
     assert r.grep("needle")  # global sees both
     hits = r.grep("needle", scope_cwd="/Users/me/repoA")
     assert hits and all(h.session_id == "sa" for h in hits), "grep scope leaked another repo"
+    store.close()
+
+
+def test_grep_scope_normalizes_generic_nested_worktree(tmp_path):
+    paths = {}
+    for name, uuid, session_id in (
+            ("main", "u-main", "s-main"),
+            ("sibling", "u-sibling", "s-sibling"),
+            ("other", "u-other", "s-other")):
+        path = tmp_path / f"{name}.jsonl"
+        path.write_text(
+            '{"type":"user","uuid":"' + uuid + '","sessionId":"' + session_id + '",'
+            '"message":{"role":"user","content":"generic worktree needle"}}\n')
+        paths[name] = path
+
+    store = Store(tmp_path / "generic-grep.db")
+    store.add(*_scoped_chunk(
+        "u-main", "generic worktree needle", "/Users/me/repoA", 0,
+        file_path=str(paths["main"]), session_id="s-main"))
+    store.add(*_scoped_chunk(
+        "u-sibling", "generic worktree needle",
+        "/Users/me/repoA/.worktrees/feature-b", 1,
+        file_path=str(paths["sibling"]), session_id="s-sibling"))
+    store.add(*_scoped_chunk(
+        "u-other", "generic worktree needle", "/Users/me/repoB", 2,
+        file_path=str(paths["other"]), session_id="s-other"))
+
+    hits = Recall(store, FakeEmbedder(), FakeReranker()).grep(
+        "generic worktree needle",
+        scope_cwd="/Users/me/repoA/.worktrees/feature-a/src/package")
+
+    assert {hit.session_id for hit in hits} == {"s-main", "s-sibling"}
     store.close()
 
 
