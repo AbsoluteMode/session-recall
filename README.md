@@ -1,5 +1,7 @@
 # session-recall
 
+*Русская версия: [docs/README.ru.md](docs/README.ru.md)*
+
 **Shared memory for Claude Code and Codex.** Pick up work from a month ago without
 re-explaining it — and Claude can read what Codex worked out yesterday, because both engines
 feed one index. Not a summary file someone maintains by hand: the actual turns, including tool
@@ -23,6 +25,25 @@ Then your agent stops asking you what you were doing:
 > rejected the shared-credentials-directory patch as too coupled, and settled on a keeper service
 > owning the session. The spec was never written — that was the next step.
 
+## Where it pays off
+
+Two months of daily use; the cases that stuck:
+
+- **Session onboarding.** A fresh session starts already in context — whether you juggle
+  several subscriptions, hop between coding agents (Claude reads what Codex worked out
+  yesterday), brainstorm the same problem across parallel sessions, or return to a task
+  you "discussed at some point".
+- **Bugs and regressions.** Before fixing anything, the agent asks the history: *was this
+  bug seen before? how was it fixed? why did we believe it was fixed?* A recurrence you
+  yourself forgot stops looking like a fresh bug — and the fix turns from a patch into a
+  dig into the component.
+- **Actions.** Explain a procedure once — how to read a trace, fill your work
+  spreadsheets, break down token spend per task per model — and any later session
+  replays it without being walked through again.
+- **Cause and effect.** Say "let's change this decision", and the agent looks up the
+  moment it was made: *"we picked X for compatibility with Y — before changing anything,
+  make sure Y survives."*
+
 Five tools over MCP:
 
 - `recall_search(query)` — find a past discussion **by meaning** (not substring). Answers
@@ -35,7 +56,9 @@ Five tools over MCP:
   under-the-hood turns (tool output, thinking) that never became search chunks.
 - `recent_sessions()` — the freshest past sessions first (what's current, how fresh the index is).
 
-On-demand (no proactive auto-injection in v1). Local, open source.
+On-demand (no proactive auto-injection in v1). Local, open source. The tools are plain
+MCP, so any MCP-capable agent — Cursor included — can search the same history; the
+histories being indexed today come from Claude Code and Codex.
 
 `recall_search`, `grep` and `recent_sessions` also take an optional `scope_cwd` — pass your
 current working directory to scope results to the current repo (worktrees collapse to the repo
@@ -260,6 +283,49 @@ wait. Keep the host-level hook synchronous: the shell already backgrounds the in
 Codex ignores Claude's `async` extension. A `launchd`/cron timer is another option. (Local on one machine is enough; a server-side
 index only makes sense across several machines — at the cost of privacy and network.)
 
+## Team mode — ask a colleague's history
+
+The same recall, across machines: pair with a colleague once, and your agent can ask
+their agent about their past work.
+
+> **you → a colleague's agent:** when you hit the local-launch problem with X — how did
+> you solve it?
+>
+> **their agent** *(after the colleague approves the answer)*: pin the config to …, then
+> …, and the problem does not come back.
+
+The agents negotiate the details between themselves; what used to be a Slack thread and a
+half-remembered explanation becomes one question and one grounded answer. You never see
+the colleague's raw history — only the approved answer.
+
+Privacy here is mechanics, not policy:
+
+- questions and answers travel as **end-to-end encrypted envelopes** through a relay that
+  stores blind blobs — the relay cannot read them;
+- answers are built by an **isolated read-only worker**, scoped to the projects that
+  contact was explicitly granted (`share allow`);
+- every candidate answer passes a **secret scanner** and then **explicit approval** by
+  the owner (Telegram bot, or `share approve` locally) before it leaves the machine;
+- a contact can be paused any time (`share pause`), a peer revoked (`share revoke`).
+
+Pairing is a one-time ceremony with a short SAS check, then asking is one command:
+
+```bash
+session-recall share init            # once per device, both sides
+session-recall share invite          # you: prints a one-time code
+session-recall share join <code>     # colleague: accepts it
+session-recall share complete        # you: finish the handshake
+session-recall share trust <name>    # both: confirm the SAS matched, name the peer
+session-recall share allow <name> <project>
+session-recall share notify          # owner side: worker + approval loop
+
+session-recall share ask <name> "how did you fix the local X launch?"
+session-recall share fetch           # collect the answers
+```
+
+Searching a peer's index needs no embedding setup on your side: the query travels as
+text, and the owner's worker embeds it with their own provider against their own index.
+
 ## meta docs — the project's memory, written down
 
 Raw recall answers "what was said". meta docs answers the questions agents
@@ -284,6 +350,7 @@ session-recall metadocs init ~/meta-docs --from-today   # memory starts now
 session-recall metadocs run                             # one pass now
 session-recall metadocs enable                          # daily launchd job (default 21:00)
 session-recall metadocs status
+session-recall metadocs index-history --days 30         # opt-in: distill the past, once
 ```
 
 The agent's whole world is four MCP verbs — `search / create / edit /
@@ -294,8 +361,20 @@ mandatory), entries are scanned for secrets before a byte reaches disk, and
 Runs are incremental (per-session watermarks) and each changed project gets
 its own commit — review is a diff, undo is a revert, and sharing the memory
 with a team is just pushing the repo somewhere private. Commits stay local
-unless you opt into `--push`; the model comes from config only
-(`init --model …`).
+unless you opt into `--push`; the distilling agent and model come from config only
+(`init --engine claude-cli|codex --model … [--reasoning …]`) — nothing is picked
+silently. The daily job never touches history; `index-history` is the only door to
+the past.
+
+## Roadmap
+
+- **Hosted/team index** — one shared index for a team instead of per-machine copies. The
+  honest open question: whoever searches must embed the query, so a shared vector space
+  implies a shared embedding path (a team key, or a small embedding proxy in front of
+  the provider).
+- **Per-contact bypass** — skip per-answer approval for peers you fully trust; today
+  every answer is approved explicitly.
+- **More histories** — Cursor and other agents' transcripts as index sources.
 
 ## Privacy — hard invariant
 
