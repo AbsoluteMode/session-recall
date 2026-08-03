@@ -308,9 +308,76 @@ Privacy here is mechanics, not policy:
   the owner (Telegram bot, or `share approve` locally) before it leaves the machine;
 - a contact can be paused any time (`share pause`), a peer revoked (`share revoke`).
 
+### Pick a transport (once, before pairing)
+
+Nothing is baked in: a fresh install has **no transport** and never talks to a
+server you didn't choose. The relay is blind — everything it carries is sealed
+and signed on the clients — so which one to use is coordination between peers,
+not a matter of trust. Three recipes, simplest first:
+
+**Shared folder — zero infrastructure.** Two accounts on one machine, or any
+folder both peers sync (Syncthing, Dropbox, an NFS mount):
+
+```bash
+export SESSION_RECALL_SHARE_TRANSPORT_DIR=~/Sync/sr-share   # both peers, same folder
+```
+
+**Your relay on the LAN.** One machine runs it, everyone points at it.
+Envelopes are end-to-end encrypted regardless, but this is plain HTTP —
+mailbox addresses travel readable, so keep it to a network you trust:
+
+```bash
+session-recall share relay --port 8787 --host 0.0.0.0       # on the relay machine
+export SESSION_RECALL_RELAY_URL=http://192.168.1.20:8787    # on every peer
+```
+
+**Your relay on the internet.** The relay binds localhost on purpose and
+expects a TLS terminator in front. On the server:
+
+```bash
+pipx install git+https://github.com/AbsoluteMode/session-recall
+session-recall share relay --port 8787    # binds 127.0.0.1
+```
+
+As a user systemd service (`~/.config/systemd/user/sr-relay.service`):
+
+```ini
+[Unit]
+Description=session-recall share relay
+
+[Service]
+ExecStart=%h/.local/bin/session-recall share relay --port 8787
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now sr-relay
+loginctl enable-linger $USER              # keep it alive after logout
+```
+
+Any TLS proxy in front works; Caddy is the two-line option:
+
+```
+relay.example.com {
+    reverse_proxy 127.0.0.1:8787
+}
+```
+
+Then on every peer: `export SESSION_RECALL_RELAY_URL=https://relay.example.com`.
+The relay stores only sealed blobs under `<data-dir>/share-relay`, and a
+mailbox is emptied on fetch; `SESSION_RECALL_RELAY_URL=none` keeps an install
+network-silent on purpose. Put the `export` in your shell profile so agents
+and timers see it too.
+
+### Pairing
+
 Pairing is a one-time ceremony with a short SAS check, then asking is one command:
 
 ```bash
+export SESSION_RECALL_RELAY_URL=https://relay.example.com   # both sides: the transport you picked
 session-recall share init            # once per device, both sides
 session-recall share invite          # you: prints a one-time code
 session-recall share join <code>     # colleague: accepts it

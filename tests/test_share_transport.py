@@ -1,14 +1,13 @@
-"""Transport selection: explicit env wins, the public relay is the default
-(zero-config onboarding), and `none` opts out of the network entirely."""
+"""Transport selection: explicit env wins, nothing configured means no
+transport at all (an install never talks to a server its user didn't choose),
+and `none` opts out of the network entirely."""
 
 from session_recall.share.transport import (
-    DEFAULT_RELAY_URL, FileTransport, HttpRelayTransport, from_env)
+    FileTransport, HttpRelayTransport, from_env)
 
 
-def test_default_is_the_public_relay():
-    t = from_env({})
-    assert isinstance(t, HttpRelayTransport)
-    assert t.base == DEFAULT_RELAY_URL.rstrip("/")
+def test_unconfigured_means_no_transport():
+    assert from_env({}) is None
 
 
 def test_explicit_url_wins(tmp_path):
@@ -17,7 +16,7 @@ def test_explicit_url_wins(tmp_path):
     assert isinstance(t, HttpRelayTransport) and t.base == "https://my.example"
 
 
-def test_shared_dir_beats_the_default(tmp_path):
+def test_shared_dir_is_the_zero_infra_path(tmp_path):
     assert isinstance(from_env(
         {"SESSION_RECALL_SHARE_TRANSPORT_DIR": str(tmp_path)}), FileTransport)
 

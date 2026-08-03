@@ -119,29 +119,27 @@ class HttpRelayTransport:
         return [base64.b64decode(i) for i in items]
 
 
-# The public relay every fresh install talks to, so onboarding is
-# `share init` → `share invite` with zero configuration. Baking it in is safe
-# because the relay is blind: everything it carries is sealed and signed
-# client-side, so WHICH relay both sides use is coordination, not trust — and a
-# built-in default is the one value two strangers already agree on.
+# No relay is baked in: an open-source install must never talk to a server
+# its user did not choose — not even a blind one. WHICH transport two peers
+# use is coordination they settle when they pair (the relay only ever carries
+# blobs sealed and signed client-side, so the choice is about metadata and
+# availability, not message trust).
 #
-# Deliberately NOT taken from the pairing bundle: a bundle is peer-supplied
-# data, and a relay URL inside it would let a malicious bundle point this
-# client at an attacker's server. Changing relays is manual by design.
-DEFAULT_RELAY_URL = "https://relay.terra-sandbox.ru"
+# Deliberately NOT taken from the pairing bundle either: a bundle is
+# peer-supplied data, and a relay URL inside it would let a malicious bundle
+# point this client at an attacker's server. Configuring the transport is
+# manual by design.
 
 
 def from_env(env: dict, identity=None) -> Transport | None:
-    """Explicit relay URL wins; a shared directory is the zero-infra fallback;
-    otherwise the public relay. `SESSION_RECALL_RELAY_URL=none` (or `off`)
-    disables the relay — with no directory configured that means no transport
-    at all, for installs that must never speak to the network."""
+    """Explicit relay URL wins; a shared directory is the zero-infra
+    alternative; nothing configured means NO transport at all — the CLI
+    surfaces what to set. `SESSION_RECALL_RELAY_URL=none` (or `off`)
+    disables the relay while leaving a configured directory usable."""
     url = (env.get("SESSION_RECALL_RELAY_URL") or "").strip()
     if url and url.lower() not in ("none", "off"):
         return HttpRelayTransport(url, identity=identity)
     root = env.get("SESSION_RECALL_SHARE_TRANSPORT_DIR")
     if root:
         return FileTransport(Path(root))
-    if url:                      # explicit none/off, nothing else configured
-        return None
-    return HttpRelayTransport(DEFAULT_RELAY_URL, identity=identity)
+    return None
