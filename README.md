@@ -139,6 +139,12 @@ for months of transcripts, seconds after that.
 
 Then start a new session — MCP servers and skills load at session start, not on install.
 
+Prefer to let the agent do the setup? After installing the plugin, say
+"set up session-recall" (or run `/session-recall:setup`): the agent asks the
+three onboarding questions in chat — language, local or cloud embedder,
+solo or team — runs the commands itself, and finishes with a health check
+and a real search over your history.
+
 **Codex** — the `.codex-plugin/plugin.json` manifest is ready to drop into a local repo or your
 personal marketplace; see the
 [local plugin installation guide](https://learn.chatgpt.com/docs/build-plugins#install-a-local-plugin-manually).
