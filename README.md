@@ -1,4 +1,9 @@
 <div align="center">
+  <img src="assets/session-recall-logo.png" alt="Session Recall logo" width="112" />
+
+  <br />
+  <br />
+
   <a href="#quick-start">
     <img src="site/public/og.png" alt="Session Recall — one memory for Claude Code, Codex, and Cursor" width="100%" />
   </a>
@@ -31,7 +36,8 @@ resumed sessions, subscriptions, worktrees, and different agents.
 Session Recall turns that history into one local-first index and exposes five focused MCP
 tools. A fresh Cursor session can recover what Codex discovered yesterday and what Claude
 Code rejected three months ago — with links back to the actual turns, tool output, and
-reasoning.
+reasoning. Optionally, your agent can ask a colleague's agent and receive only the answer
+they approve, never their raw session history.
 
 ```text
 you       we were fixing the auth-token conflict — where did we land?
@@ -56,6 +62,7 @@ agent     [recall_search → expand_around]
 | **Honest degradation** | A semantic outage is reported explicitly | Literal fallback never pretends to be semantic search |
 | **Local by default** | Bundled ONNX embeddings and local SQLite | Start without a key, server, or account |
 | **Scoped recall** | Filter by repo, source, or local calendar dates | Keep unrelated projects out of the answer |
+| **Team answers** | Ask a colleague's local memory with owner approval | Share hard-won context without exposing raw sessions |
 
 ### Where it pays off
 

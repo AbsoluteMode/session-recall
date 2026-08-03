@@ -22,10 +22,14 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "Session Recall — shared memory for coding agents",
     description:
-      "One local-first semantic memory for Claude Code, Codex, and Cursor. Search old decisions by meaning and reopen the raw evidence.",
+      "One local-first semantic memory for Claude Code, Codex, and Cursor. Search old decisions, reopen raw evidence, and exchange approved answers with teammates.",
+    icons: {
+      icon: "/logo.png",
+      apple: "/logo.png",
+    },
     openGraph: {
       title: "Your coding agents forget. Session Recall doesn’t.",
-      description: "One searchable memory for Claude Code, Codex, and Cursor.",
+      description: "One searchable memory for your coding agents — with private, approval-gated team answers.",
       type: "website",
       url: origin,
       images: [{ url: `${origin}/og.png`, width: 1536, height: 1024 }],
@@ -33,7 +37,7 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: "Your coding agents forget. Session Recall doesn’t.",
-      description: "One searchable memory for Claude Code, Codex, and Cursor.",
+      description: "One searchable memory for your coding agents — with private, approval-gated team answers.",
       images: [`${origin}/og.png`],
     },
   };

@@ -153,13 +153,12 @@ export default function Home() {
     <main>
       <nav className="nav shell" aria-label="Primary navigation">
         <a className="brand" href="#top" aria-label="Session Recall home">
-          <span className="brandMark" aria-hidden="true">
-            sr
-          </span>
+          <img className="brandLogo" src="/logo.png" alt="" aria-hidden="true" />
           <span>session-recall</span>
         </a>
         <div className="navLinks">
           <a href="#tools">Tools</a>
+          <a href="#team">Team</a>
           <a href="#install">Install</a>
           <a href="#privacy">Privacy</a>
           <a className="navGit" href={GITHUB} target="_blank" rel="noreferrer">
@@ -344,9 +343,75 @@ export default function Home() {
         </div>
       </section>
 
+      <section className="teamSection section" id="team">
+        <div className="shell">
+          <div className="sectionLabel light">04 / TEAM MEMORY</div>
+          <div className="teamHead">
+            <h2>Ask a teammate’s history.<br />Never take it.</h2>
+            <div>
+              <p>
+                Pair once, then let your agent ask their agent how the team solved
+                something before. Their raw sessions never leave their machine.
+              </p>
+              <p className="teamPromise">
+                Only the project-scoped answer they approve comes back to you.
+              </p>
+            </div>
+          </div>
+
+          <div className="sharingFlow" aria-label="How team sharing works">
+            <article className="peerCard requesterCard">
+              <div className="peerHead">
+                <span className="peerAvatar">YO</span>
+                <div><b>Your agent</b><small>paired · keeper</small></div>
+              </div>
+              <div className="peerMessage">
+                <span>question</span>
+                <p>How did you fix the local launch?</p>
+              </div>
+              <small className="peerFoot">No access to their archive</small>
+            </article>
+
+            <div className="relayPath" aria-label="Encrypted blind relay">
+              <span className="sealedBadge">SEALED</span>
+              <div className="relayLine"><i /><i /><i /></div>
+              <b>blind relay</b>
+              <small>cannot read either message</small>
+              <div className="relayLine return"><i /><i /><i /></div>
+              <span className="approvedBadge">APPROVED ANSWER</span>
+            </div>
+
+            <article className="peerCard ownerCard">
+              <div className="peerHead">
+                <span className="peerAvatar owner">MK</span>
+                <div><b>Teammate’s agent</b><small>local recall · keeper</small></div>
+              </div>
+              <div className="localChecks">
+                <span><i>✓</i> project scope</span>
+                <span><i>✓</i> secret scan</span>
+                <span><i>✓</i> owner approval</span>
+              </div>
+              <small className="peerFoot">Raw history stays on this machine</small>
+            </article>
+          </div>
+
+          <div className="sharingSteps">
+            <article><span>01</span><b>Pair</b><p>Exchange one-time encrypted identities with a colleague.</p></article>
+            <article><span>02</span><b>Allow</b><p>Grant read-only recall for one explicit project scope.</p></article>
+            <article><span>03</span><b>Ask</b><p>Your agent sends a sealed question through your chosen transport.</p></article>
+            <article><span>04</span><b>Approve</b><p>The owner reviews the answer before anything leaves their machine.</p></article>
+          </div>
+
+          <div className="transportNote">
+            <span>NO CLOUD ACCOUNT REQUIRED</span>
+            <p>Choose a shared folder or run your own relay. A fresh install has no sharing transport and sends nothing anywhere.</p>
+          </div>
+        </div>
+      </section>
+
       <section className="installSection section" id="install">
         <div className="shell">
-          <div className="sectionLabel light">04 / INSTALL</div>
+          <div className="sectionLabel light">05 / INSTALL</div>
           <div className="installHead">
             <h2>Two minutes to a memory<br />that spans every agent.</h2>
             <p>Install the CLI once. Then connect whichever coding agents you use.</p>
@@ -377,7 +442,7 @@ export default function Home() {
       </section>
 
       <section className="finalCta shell section">
-        <span className="sectionLabel">05 / REMEMBER THE WORK</span>
+        <span className="sectionLabel">06 / REMEMBER THE WORK</span>
         <h2>Stop rebuilding context.<br /><em>Continue it.</em></h2>
         <p>Open source. Local-first. Built from real agent history.</p>
         <div className="heroActions center">
@@ -392,7 +457,7 @@ export default function Home() {
 
       <footer>
         <div className="shell footerInner">
-          <div className="brand"><span className="brandMark">sr</span><span>session-recall</span></div>
+          <div className="brand"><img className="brandLogo" src="/logo.png" alt="" /><span>session-recall</span></div>
           <p>Shared memory for Claude Code, Codex, and Cursor.</p>
           <div><a href={GITHUB}>GitHub</a><a href={`${GITHUB}/blob/main/LICENSE`}>MIT License</a></div>
         </div>

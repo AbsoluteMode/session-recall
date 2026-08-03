@@ -30,12 +30,18 @@ test("server-renders the finished Session Recall landing page", async () => {
   assert.match(html, /Codex/);
   assert.match(html, /Cursor/);
   assert.match(html, /Local-first/i);
+  assert.match(html, /Ask a teammate’s history/i);
+  assert.match(html, /owner approval/i);
+  assert.match(html, /\/logo\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("ships the bespoke social card and removes the disposable preview", async () => {
+test("ships the brand assets and removes the disposable preview", async () => {
   const og = await readFile(new URL("../public/og.png", import.meta.url));
   assert.deepEqual([...og.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+
+  const logo = await readFile(new URL("../public/logo.png", import.meta.url));
+  assert.deepEqual([...logo.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
