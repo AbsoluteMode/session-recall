@@ -197,6 +197,8 @@ def test_agent_argv_is_caged(tmp_path):
     disallowed = argv[argv.index("--disallowedTools") + 1]
     assert {"Bash", "Read", "Write", "WebFetch"} <= set(disallowed.split(","))
     assert "--disable-slash-commands" in argv and "--strict-mcp-config" in argv
+    # no transcript on disk → a distill call never re-enters the index
+    assert "--no-session-persistence" in argv
     assert argv[argv.index("--model") + 1] == "claude-opus-5"
     assert "--tools" not in argv          # measured: --tools "" strips MCP too
     assert "переделай" in seen["prompt"]  # prompt on stdin, not argv

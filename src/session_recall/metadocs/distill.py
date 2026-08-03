@@ -10,7 +10,10 @@ Cage, rebuilt for tools (probed live before this shape was chosen):
   positional argument — measured, not theorized);
 - cwd is an empty temp dir, so no CLAUDE.md is discovered;
 - print mode cannot grant permissions interactively, so anything that slips
-  the blocklist dies at the permission gate anyway.
+  the blocklist dies at the permission gate anyway;
+- `--no-session-persistence` (probed live: print-mode only) leaves no
+  transcript on disk, so a distill call can never re-enter the index as a
+  session — the same guarantee `--ephemeral` gives the codex engine.
 
 The dialogue is untrusted (sessions quote the whole internet). With tools in
 the cage an injection now has verbs, not just words — which is why the
@@ -120,6 +123,7 @@ def cli_agent_distiller(repo: str, model: str = "", runner=None) -> Distiller:
             cfg_path.write_text(json.dumps(
                 _mcp_config(repo, project, session_key)))
             argv = [shutil.which("claude") or "claude", "-p",
+                    "--no-session-persistence",
                     "--mcp-config", str(cfg_path),
                     "--strict-mcp-config",
                     "--allowedTools", ",".join(AGENT_TOOLS),
@@ -157,7 +161,7 @@ def cli_agent_distiller(repo: str, model: str = "", runner=None) -> Distiller:
 #   Only then is --dangerously-bypass-approvals-and-sandbox sound: the sandbox
 #   only ever guarded shell commands, and there is no shell left to guard.
 # - `--ephemeral`: no transcript is persisted, so a distill run cannot re-enter
-#   the index as a session (the claude engine still has that caveat).
+#   the index as a session (the claude engine's --no-session-persistence twin).
 # - `--ignore-user-config`: no user hooks or MCP servers bleed into the cage.
 # - no --system-prompt flag exists: instructions ride at the top of stdin.
 _CODEX_DISABLED = ("shell_tool", "unified_exec", "code_mode_host",
