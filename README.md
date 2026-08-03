@@ -1,6 +1,7 @@
 # session-recall
 
-*Русская версия: [docs/README.ru.md](docs/README.ru.md)*
+*Русская версия: [docs/README.ru.md](docs/README.ru.md) · Español:
+[README.es-ES.md](README.es-ES.md) (community translation)*
 
 **Shared memory for Claude Code, Codex, and Cursor.** Pick up work from a month ago without
 re-explaining it — and Claude can read what Codex worked out yesterday, because both engines
