@@ -17,9 +17,10 @@ from .transport import from_env
 from .trust import Peer, TrustStore
 
 _TRANSPORT_HINT = (
-    "transport disabled (SESSION_RECALL_RELAY_URL=none) — unset it to use the "
-    "default relay, set it to your own relay, or set "
-    "SESSION_RECALL_SHARE_TRANSPORT_DIR for a shared folder")
+    "no transport configured — set SESSION_RECALL_RELAY_URL to your relay "
+    "(README → Team mode has LAN and self-host recipes), or "
+    "SESSION_RECALL_SHARE_TRANSPORT_DIR to a folder both peers sync; "
+    "SESSION_RECALL_RELAY_URL=none keeps this install offline on purpose")
 
 
 def add_parser(sub) -> None:
