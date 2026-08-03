@@ -474,6 +474,9 @@ class _FakeStore:
     def is_indexed(self, path, sig):
         return self.indexed.get(path) == sig
 
+    def stored_sig(self, path):
+        return self.indexed.get(path)
+
     def embeddings_by_hash(self, path):
         return {}
 

@@ -51,9 +51,9 @@ class Recall:
 
     @staticmethod
     def _validate_source(source: str | None) -> None:
-        if source not in {None, "claude", "codex"}:
+        if source not in {None, "claude", "codex", "cursor"}:
             raise ValueError(
-                f"source must be 'claude', 'codex', or omitted; got {source!r}")
+                f"source must be 'claude', 'codex', 'cursor', or omitted; got {source!r}")
 
     @staticmethod
     def _anchor(c, score: "float | None") -> Anchor:

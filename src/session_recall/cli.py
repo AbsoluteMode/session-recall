@@ -73,27 +73,28 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="session-recall")
     sub = parser.add_subparsers(dest="cmd", required=True)
     ip = sub.add_parser("index")
-    ip.add_argument("--source", choices=("all", "claude", "codex"), default="all")
+    ip.add_argument("--source", choices=("all", "claude", "codex", "cursor"),
+                    default="all")
     sp = sub.add_parser("search")
     sp.add_argument("query")
     sp.add_argument("-k", type=int, default=10)
     sp.add_argument("--scope", help="cwd to scope results to (repo root)")
-    sp.add_argument("--source", choices=("claude", "codex"))
+    sp.add_argument("--source", choices=("claude", "codex", "cursor"))
     _add_date_args(sp)
     rp = sub.add_parser("recent")
     rp.add_argument("--scope")
     rp.add_argument("-n", type=int, default=10)
-    rp.add_argument("--source", choices=("claude", "codex"))
+    rp.add_argument("--source", choices=("claude", "codex", "cursor"))
     _add_date_args(rp)
     gp = sub.add_parser("grep")
     gp.add_argument("pattern")
     gp.add_argument("--scope")
     gp.add_argument("--session")
-    gp.add_argument("--source", choices=("claude", "codex"))
+    gp.add_argument("--source", choices=("claude", "codex", "cursor"))
     gp.add_argument("--limit", type=int, default=100)
     _add_date_args(gp)
     pp = sub.add_parser("prune")  # drop rows for transcripts deleted from disk
-    pp.add_argument("--source", choices=("claude", "codex"))
+    pp.add_argument("--source", choices=("claude", "codex", "cursor"))
     sub.add_parser("health")  # is recall actually working right now?
     from .share import cli as share_cli
     share_cli.add_parser(sub)
@@ -125,6 +126,11 @@ def main(argv=None):
             codex_dirs=codex_roots,
         )
         print(f"indexed {n} chunks from changed transcripts")
+        if args.source in {"all", "cursor"}:
+            from .cursor import index_cursor
+            c = index_cursor(store, embedder)
+            if c:
+                print(f"indexed {c} cursor session(s)")
         # meta docs entries ride the same index (source="metadocs") whenever
         # the feature is configured; the SessionStart hook keeps them fresh
         if args.source == "all":
