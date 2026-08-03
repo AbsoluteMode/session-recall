@@ -89,10 +89,12 @@ La interfaz se mantiene deliberadamente pequeña:
 ```mermaid
 flowchart LR
     Q["describe the old problem"] --> S["recall_search"]
-    S --> A["ranked anchor"]
+    X["exact error / symbol / path"] --> G["grep"]
+    S --> A["anchor: session + turn"]
+    G --> A
     A --> E["expand_around"]
-    E --> T["step next / prev"]
-    Q -. exact identifier .-> G["grep"]
+    E <--> T["step next / prev"]
+    E --> V["grounded answer + raw evidence"]
     R["what is current?"] --> RS["recent_sessions"]
 ```
 
