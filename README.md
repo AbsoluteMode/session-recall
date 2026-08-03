@@ -2,7 +2,7 @@
 
 *Русская версия: [docs/README.ru.md](docs/README.ru.md)*
 
-**Shared memory for Claude Code and Codex.** Pick up work from a month ago without
+**Shared memory for Claude Code, Codex, and Cursor.** Pick up work from a month ago without
 re-explaining it — and Claude can read what Codex worked out yesterday, because both engines
 feed one index. Not a summary file someone maintains by hand: the actual turns, including tool
 calls and reasoning, searchable by meaning.
@@ -57,8 +57,8 @@ Five tools over MCP:
 - `recent_sessions()` — the freshest past sessions first (what's current, how fresh the index is).
 
 On-demand (no proactive auto-injection in v1). Local, open source. The tools are plain
-MCP, so any MCP-capable agent — Cursor included — can search the same history; the
-histories being indexed today come from Claude Code and Codex.
+MCP, so any MCP-capable agent can search the same history; the histories being
+indexed today come from Claude Code, Codex, and Cursor.
 
 `recall_search`, `grep` and `recent_sessions` also take an optional `scope_cwd` — pass your
 current working directory to scope results to the current repo (worktrees collapse to the repo
@@ -76,8 +76,10 @@ the computer running the MCP server.
 
 ## How it works
 
-Claude Code transcripts and Codex sessions from `~/.codex/sessions` plus
-`~/.codex/archived_sessions` share the same index.
+Claude Code transcripts, Codex sessions from `~/.codex/sessions` plus
+`~/.codex/archived_sessions`, and Cursor sessions (read via a snapshot of its
+SQLite store, `User/globalStorage/state.vscdb`; subagent sessions skipped,
+workspaces mapped to projects) share the same index.
 Only the conversation "surface" is embedded — user prompts and assistant text replies.
 Tool calls, results, reasoning, and other trace data are not embedded but stay reachable on
 demand via `expand_around` (and `step`) or `grep`. Raw Codex transcript files remain local;
@@ -185,6 +187,7 @@ which is exactly the failure that is otherwise invisible.
 | Symptom | Cause |
 |---|---|
 | `recall_search` answers with `degraded` set | The embedding provider is unreachable — only literal word matching ran. Results are still real, but a miss proves nothing. |
+| `degraded` says "embedder changed" | The index was built in a different embedding space than the current config. Run `session-recall index` to re-embed; semantic ranking stays off until then, on purpose. |
 | Indexer logs `HTTP code 403` with an HTML body | Not your key: a WAF is blocking your IP (common on VPN and datacenter exits). Same 403 appears with no key at all. Route egress elsewhere or switch provider. |
 | `Missing dependencies for SOCKS support` | A SOCKS proxy is set in the environment but `PySocks` is not installed in that venv. |
 | `recent_sessions` shows an old timestamp | The indexer has not succeeded recently. Run `session-recall index` by hand and read the output. |
@@ -192,7 +195,7 @@ which is exactly the failure that is otherwise invisible.
 ### CLI reference
 
 ```bash
-session-recall index --source claude|codex|all   # defaults to all
+session-recall index --source claude|codex|cursor|all   # defaults to all
 session-recall search "query" --source codex
 session-recall recent --date 2026-07-14          # this computer's timezone
 session-recall search "deployment work" --start-date 2026-07-14 \
@@ -201,7 +204,7 @@ session-recall grep "exact" --limit 100          # raw scan, no API key needed
 session-recall prune                             # drop rows for deleted transcripts
 ```
 
-`search`, `recent`, `grep`, and `prune` all take an optional `--source claude|codex`; omit it to
+`search`, `recent`, `grep`, and `prune` all take an optional `--source claude|codex|cursor`; omit it to
 search both. Date filters are inclusive and either boundary may be omitted; the timezone
 defaults to this computer's and accepts any IANA name. `grep` caps at 100 matches by default.
 
@@ -463,7 +466,9 @@ the past.
   the provider).
 - **Per-contact bypass** — skip per-answer approval for peers you fully trust; today
   every answer is approved explicitly.
-- **More histories** — Cursor and other agents' transcripts as index sources.
+- **More histories** — Cursor shipped as the third source (sessions are read
+  from its SQLite store, subagents skipped, workspace mapped to a project);
+  other agents' transcripts next.
 
 ## Privacy — hard invariant
 
