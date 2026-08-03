@@ -2,6 +2,10 @@
 
 # session-recall
 
+*Traducción de la comunidad (gracias, @webbrain-one). Puede ir por detrás del
+[README en inglés](README.md), que es la referencia; versión en ruso:
+[docs/README.ru.md](docs/README.ru.md).*
+
 **Memoria compartida para Claude Code y Codex.** Retoma el trabajo de hace un mes sin tener que reexplicarlo: y Claude puede leer lo que Codex resolvió ayer, porque ambos motores alimentan un mismo índice. No es un archivo de resumen que alguien mantiene a mano: son los turnos reales, incluidas las llamadas a herramientas y el razonamiento, buscables por significado.
 
 ```console
