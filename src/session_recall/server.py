@@ -21,7 +21,21 @@ def _adict(a) -> dict:
     return d
 
 
-def build_recall() -> Recall:
+def build_recall():
+    """The local index, or the team hub when this machine has joined one.
+
+    The five tools below do not change shape either way — that is the point.
+    A member's agent asks the same questions and gets the same answers; only
+    the corpus is bigger and the embedding happens on the server.
+
+    Deciding here (rather than per tool) keeps the solo install untouched: no
+    hub config, no import, no behaviour change.
+    """
+    from .hub.client import HubConfig
+    cfg = HubConfig.load()
+    if cfg is not None:
+        from .hub.remote import RemoteRecall
+        return RemoteRecall(cfg)
     return Recall(Store(DB_PATH), make_embedder(), make_reranker())
 
 
