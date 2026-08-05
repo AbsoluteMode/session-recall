@@ -15,6 +15,9 @@ they do NOT carry is the transcript path: it names a directory on the server
 and helps nobody.
 """
 
+import time
+
+from ..timefmt import humanize_ts
 from .indexer import owner_of
 
 # Appended to the shared composer system prompt. The hub pools everyone's
@@ -53,6 +56,10 @@ def answer(hub, question: str, k: int = MAX_FRAGMENTS,
     hits = hub.recall.recall_search(question, k=k, scope_cwd=scope_cwd,
                                     source=source)
     owners = _owners_for(hub, hits)
+    # Humanised here, not taken off the anchor: `when_human` is added when an
+    # anchor is serialised for a tool response, so an answer built straight
+    # from Recall would print "(  )" where the date belongs.
+    now = int(time.time())
     chunks = []
     for anchor in hits:
         chunks.append({
@@ -62,7 +69,7 @@ def answer(hub, question: str, k: int = MAX_FRAGMENTS,
             "project": anchor.project,
             "snippet": anchor.snippet,
             "when": anchor.when,
-            "when_human": getattr(anchor, "when_human", ""),
+            "when_human": humanize_ts(anchor.when, now),
             "source": anchor.source,
             "owner": owners.get(anchor.session_id),
         })

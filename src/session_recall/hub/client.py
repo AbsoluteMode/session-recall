@@ -34,8 +34,15 @@ from ..share.scanner import redact
 from . import storage
 
 CONFIG_PATH = config.DATA_DIR / "hub.json"
-CHUNK_BYTES = 256 * 1024
-_TIMEOUT_S = 60
+# Sized from the first real deploy, not from taste. At 256 KB a 3.5 GB
+# history moved at ~0.1 MB/s: every chunk is its own request, and urllib
+# opens a fresh connection each time, so the cost was one TLS handshake plus
+# one fsync per 256 KB rather than the bytes themselves. 4 MB cuts that by
+# 16x and still leaves room under the hub's 16 MB body cap once base64
+# expands it by a third (the body is gzipped on top, so the wire figure is
+# lower again).
+CHUNK_BYTES = 4 * 1024 * 1024
+_TIMEOUT_S = 300          # a 4 MB chunk on a slow uplink outlasts 60s
 
 CONSENT = """\
 Подключение к общему индексу команды

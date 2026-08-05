@@ -205,3 +205,12 @@ def test_mcp_picks_the_hub_only_when_joined(monkeypatch, tmp_path):
     monkeypatch.setattr(HubConfig, "load",
                         staticmethod(lambda path=None: HubConfig("http://h", "k")))
     assert isinstance(mcp_server.build_recall(), RemoteRecall)
+
+
+def test_digest_dates_are_human_readable(hub):
+    """`when_human` is added at serialisation time, so an answer built straight
+    from Recall must humanise the epoch itself or print an empty pair of
+    brackets where the date belongs."""
+    result = hub_ask.answer(hub, "как чинили CI?", composer=None)
+    assert result["sources"][0]["when_human"].strip()
+    assert "()" not in result["answer"]
