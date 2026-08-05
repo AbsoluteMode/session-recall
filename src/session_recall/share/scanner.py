@@ -49,14 +49,28 @@ def scan(text: str) -> list[Finding]:
     return findings
 
 
+# Patterns precise enough to cut with nobody looking. `password-assignment` is
+# deliberately NOT here: `\w*(token|secret|key)\s*[=:]\s*\S{8,}` matches any
+# JSON field, config line or sentence shaped like "token: …", and on the first
+# real corpus it fired 27324 times against ~1900 for every real key format
+# combined — it deletes the surrounding work, not the secrets. It stays in
+# `scan`, where a human reads the finding and decides.
+_AUTO_REDACT = {
+    "aws-access-key", "anthropic-key", "openai-key", "github-token",
+    "gitlab-token", "slack-token", "jwt", "private-key-pem",
+    "telegram-bot-token", "connection-string",
+}
+
+
 def redact(text: str) -> tuple[str, int]:
-    """Replace every match with `[REDACTED:<kind>]`, returning the count too.
+    """Replace confidently-identified secrets with `[REDACTED:<kind>]`.
 
     `scan` flags for a human who then decides; this one decides for them, and
     exists for the path where no human is in the loop: a hub client uploading
     a member's transcripts. There the same finding cannot become a preview to
     approve — the alternative to cutting it is shipping it — so the tripwire
-    is wired to act.
+    is wired to act, and therefore has to be far more conservative about what
+    it fires on than the flagging path.
 
     Still a tripwire, not a guarantee: it knows FORMATS, so it catches an
     `sk-ant-…` and cannot catch a password. Values the team actually keeps in
@@ -65,6 +79,8 @@ def redact(text: str) -> tuple[str, int]:
     """
     count = 0
     for kind, pattern in _PATTERNS:
+        if kind not in _AUTO_REDACT:
+            continue
         text, hits = pattern.subn(f"[REDACTED:{kind}]", text)
         count += hits
     return text, count

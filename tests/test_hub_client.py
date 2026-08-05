@@ -172,3 +172,17 @@ def test_a_revoked_key_stops_the_push_with_a_clear_message(cfg, hub, roots):
     hub.keys.revoke("egor")
     with pytest.raises(HubError, match="revoked"):
         push(cfg, roots=roots)
+
+
+def test_broad_assignment_pattern_does_not_eat_ordinary_text(cfg, hub, roots):
+    """`token: abc12345` appears in code, JSON and prose everywhere. Cutting it
+    automatically removed 27324 fragments of real work on the first corpus."""
+    ordinary = roots["claude_root"] / "-Users-egor-proj" / "sess-a.jsonl"
+    ordinary.write_text(json.dumps(
+        {"text": "в конфиге поле token: abcdef123456 — разберись почему падает"}) + "\n")
+
+    stats = push(cfg, roots=roots)
+    stored = storage.resolve(hub.transcripts, "egor",
+                             "claude/-Users-egor-proj/sess-a.jsonl").read_text()
+    assert stats["redacted"] == 0
+    assert "token: abcdef123456" in stored

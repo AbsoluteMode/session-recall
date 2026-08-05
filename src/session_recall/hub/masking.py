@@ -48,6 +48,18 @@ _NEVER_MASK = {
     "DOPPLER_PROJECT", "DOPPLER_CONFIG", "DOPPLER_ENVIRONMENT",
 }
 
+# Only variables whose NAME says "credential" are masked. Learned the hard way
+# on the first real corpus: shape alone cannot tell `claude-opus-4` from a
+# token — both are short, mixed-class strings — so an entropy filter masked
+# 851 mentions of a model name, 2429 of a hostname and 1536 of a server IP,
+# which broke reading and searching the team's history far worse than the
+# leak it prevented. A Doppler config holds credentials AND plain
+# configuration; only the first kind belongs here.
+_SECRET_NAME_RE = re.compile(
+    r"PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|PRIVATE|SIGNING|"
+    r"API[_-]?KEY|ACCESS[_-]?KEY|[_-]KEY$|^KEY$|DSN|SALT|SESSION[_-]?ID",
+    re.IGNORECASE)
+
 # Three alphabets, widest first. One tokenisation is not enough: with only the
 # wide class, `--key=sk-ant-AAAA…` is a single token and never equals the
 # stored value, while the medium class splits it at `=` and yields the key
@@ -62,13 +74,16 @@ _TRIM = "-._=+/~"
 
 
 def maskable(name: str, value: str) -> bool:
-    """Is this Doppler entry safe to mask on sight?
+    """Is this Doppler entry a credential worth masking on sight?
 
-    Length alone is not enough (a 12-character English word exists) and
-    entropy alone is not either, so: long, not a known label, and showing more
-    variety than a plain lowercase word.
+    Two gates, and the NAME gate is the important one: a Doppler config mixes
+    credentials with ordinary configuration (model names, hostnames, regions),
+    and only the former should ever be rewritten. The shape gate then rejects
+    the short, low-entropy values that would eat ordinary words.
     """
     if name in _NEVER_MASK or not value or len(value) < MIN_LENGTH:
+        return False
+    if not _SECRET_NAME_RE.search(name):
         return False
     if any(ch.isspace() for ch in value):
         return False          # multi-line/PEM: never a single token anyway
