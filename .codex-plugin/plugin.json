@@ -1,6 +1,6 @@
 {
   "name": "session-recall",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Shared semantic recall over local Claude Code, Codex, and Cursor history, with durable deep navigation and guided setup.",
   "author": {
     "name": "Max Butorin"
