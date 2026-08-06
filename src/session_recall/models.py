@@ -31,6 +31,13 @@ class Anchor:
     project: str
     when: int
     source: str = "claude"
+    # Whose history this came from. None on a solo install, where there is only
+    # one person's sessions and the question never arises; filled on a team hub,
+    # where "who did this" decides whether you trust the hit and who to ask.
+    # A field rather than an extra dict key: the hub client and the MCP layer
+    # both serialise strictly by these fields, and would drop anything else.
+    # WHY: docs/decisions/2026-08-06-team-hub-central-index.md
+    owner: "str | None" = None
 
 @dataclass
 class Turn:

@@ -18,6 +18,11 @@ def _adict(a) -> dict:
     # for sorting, `when_human` makes "now vs old" legible at the tool boundary.
     d = asdict(a)
     d["when_human"] = humanize_ts(a.when, int(time.time()))
+    # A solo index has exactly one owner, so the field would be a null on every
+    # anchor forever. Dropped rather than sent: an agent reading "owner": null
+    # ten times learns nothing, and the hub keeps the field meaningful.
+    if d.get("owner") is None:
+        d.pop("owner", None)
     return d
 
 

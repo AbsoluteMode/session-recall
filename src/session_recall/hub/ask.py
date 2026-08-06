@@ -18,7 +18,7 @@ and helps nobody.
 import time
 
 from ..timefmt import humanize_ts
-from .indexer import owner_of
+from .indexer import owners_for
 
 # Appended to the shared composer system prompt. The hub pools everyone's
 # history, including whatever people typed on a bad day, so the model is told
@@ -55,7 +55,7 @@ def answer(hub, question: str, k: int = MAX_FRAGMENTS,
     """Retrieve, then write. Returns answer + the sources it used."""
     hits = hub.recall.recall_search(question, k=k, scope_cwd=scope_cwd,
                                     source=source)
-    owners = _owners_for(hub, hits)
+    owners = owners_for(hub, (a.session_id for a in hits))
     # Humanised here, not taken off the anchor: `when_human` is added when an
     # anchor is serialised for a tool response, so an answer built straight
     # from Recall would print "(  )" where the date belongs.
@@ -89,26 +89,3 @@ def answer(hub, question: str, k: int = MAX_FRAGMENTS,
                      ("owner", "project", "session_id", "uuid", "when_human",
                       "source", "snippet")} for c in chunks],
     }
-
-
-def _owners_for(hub, anchors) -> dict[str, str]:
-    """session_id -> member, for a whole result set in one query.
-
-    Derived from the stored transcript path rather than a column: the tree
-    layout already encodes ownership, so this needs no schema change and is
-    correct for rows indexed before this endpoint existed.
-    """
-    ids = {a.session_id for a in anchors}
-    if not ids:
-        return {}
-    placeholders = ",".join("?" * len(ids))
-    rows = hub.recall.store.db.execute(
-        f"SELECT session_id, file_path FROM chunks "
-        f"WHERE session_id IN ({placeholders}) GROUP BY session_id",
-        tuple(ids)).fetchall()
-    found = {}
-    for session_id, file_path in rows:
-        owner = owner_of(hub, file_path) if file_path else None
-        if owner:
-            found[session_id] = owner
-    return found

@@ -37,6 +37,7 @@ from ..retrieve import Recall
 from ..timefmt import date_range_to_epoch, humanize_ts
 from . import ask as hub_ask
 from . import storage
+from .indexer import owners_for
 from .auth import KeyStore
 from .masking import SecretMap
 
@@ -115,9 +116,13 @@ class Hub:
         return found
 
 
-def _anchor(a) -> dict:
+def _anchor(a, owner: str | None = None) -> dict:
     d = asdict(a)
     d["when_human"] = humanize_ts(a.when, int(time.time()))
+    # Attribution is the one thing a pooled corpus adds to a hit: without it a
+    # colleague's session reads as your own memory. Set here rather than in
+    # Recall, which indexes members' trees without knowing they are members'.
+    d["owner"] = owner
     return d
 
 
@@ -267,8 +272,10 @@ def make_handler(hub: Hub):
                 query, k=int(body.get("k") or 10),
                 scope_cwd=body.get("scope_cwd"), source=body.get("source"),
                 start_ts=start_ts, end_ts=end_ts)
-            self._send(200, {"anchors": [_anchor(a) for a in hits],
-                             "degraded": getattr(hits, "degraded", None)})
+            owners = owners_for(hub, (a.session_id for a in hits))
+            self._send(200, {
+                "anchors": [_anchor(a, owners.get(a.session_id)) for a in hits],
+                "degraded": getattr(hits, "degraded", None)})
 
         def _expand(self, owner: str, body: dict) -> None:
             turns = hub.recall.expand_around(
@@ -296,13 +303,19 @@ def make_handler(hub: Hub):
                 pattern, body.get("session_id"), scope_cwd=body.get("scope_cwd"),
                 source=body.get("source"), limit=int(body.get("limit") or 100),
                 start_ts=start_ts, end_ts=end_ts)
-            self._send(200, {"anchors": [_anchor(a) for a in hits]})
+            owners = owners_for(hub, (a.session_id for a in hits))
+            self._send(200, {
+                "anchors": [_anchor(a, owners.get(a.session_id)) for a in hits]})
 
         def _recent(self, owner: str, body: dict) -> None:
             start_ts, end_ts = _range(body)
-            self._send(200, {"sessions": hub.recall.recent_sessions(
+            sessions = hub.recall.recent_sessions(
                 scope_cwd=body.get("scope_cwd"), limit=int(body.get("limit") or 10),
-                source=body.get("source"), start_ts=start_ts, end_ts=end_ts)})
+                source=body.get("source"), start_ts=start_ts, end_ts=end_ts)
+            owners = owners_for(hub, (s["session_id"] for s in sessions))
+            for session in sessions:
+                session["owner"] = owners.get(session["session_id"])
+            self._send(200, {"sessions": sessions})
 
         def _ask(self, owner: str, body: dict) -> None:
             question = body.get("question")
