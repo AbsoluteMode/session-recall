@@ -171,6 +171,19 @@ def test_remote_grep_and_recent(remote):
     assert remote.recent_sessions()[0]["project"] == "pr-review"
 
 
+def test_every_result_says_whose_history_it_came_from(remote):
+    """The one thing a pooled corpus must add to a hit.
+
+    Without it a colleague's session reads as your own memory: you cannot tell
+    whether to trust it or who to go and ask. Asserted through the proxy, not
+    on the server response, because the anchor is rebuilt on the client and a
+    field missing from the dataclass would be dropped there in silence.
+    """
+    assert remote.recall_search("как чинили")[0].owner == "egor"
+    assert remote.grep("mcp<2")[0].owner == "egor"
+    assert remote.recent_sessions()[0]["owner"] == "egor"
+
+
 def test_remote_ask(remote):
     assert "запинили" in remote.ask("как чинили CI?")["answer"]
 

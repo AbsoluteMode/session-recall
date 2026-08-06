@@ -62,6 +62,21 @@ def test_recall_search_enriches_with_human_timestamp(tmp_path, monkeypatch):
     store.close()
 
 
+def test_solo_anchors_carry_no_owner_field(tmp_path, monkeypatch):
+    """A one-person index has nobody to attribute to, so the field is dropped.
+
+    Kept out of the payload rather than sent as null: an agent reading
+    "owner": null on every anchor learns nothing, and the field stays a real
+    signal on a team hub, where it is filled.
+    """
+    store = Store(tmp_path / "solo.db")
+    store.add(*_mk("u1", "alpha", "/Users/me/repoA", 0))
+    monkeypatch.setattr(server, "_recall", Recall(store, FakeEmbedder(), FakeReranker()))
+    out = server.recall_search("alpha", k=1)["anchors"]
+    assert out and "owner" not in out[0]
+    store.close()
+
+
 def test_recall_search_reports_fts_only_degrade(tmp_path, monkeypatch):
     """Embedder unreachable -> search runs on FTS alone. The response MUST say so:
     without the flag a lexical result set is indistinguishable from a semantic one,
