@@ -58,6 +58,47 @@ def index_all(hub, embedder=None) -> dict:
     return counts
 
 
+def remask_all(hub) -> dict:
+    """Re-apply the CURRENT masking map to everything already stored.
+
+    Masking happens at ingest, so anything uploaded before a map was fixed or
+    extended keeps whatever was masked at the time. Re-uploading gigabytes to
+    fix that is absurd when the bytes are already here; this rewrites them in
+    place instead.
+
+    The ledger is deliberately NOT touched: it counts bytes of the CLIENT's
+    file, which this does not change. Rewriting a transcript does change its
+    mtime and size, so the next index run re-reads it — and unchanged chunks
+    keep their vectors through the content-hash cache, so re-embedding costs
+    only what actually changed.
+    """
+    smap = hub.secret_map
+    if not smap:
+        return {"skipped": "no masking map configured"}
+    changed, masked_total = 0, 0
+    for owner in storage.owners(hub.transcripts):
+        base = storage.owner_root(hub.transcripts, owner)
+        for path in base.rglob("*.jsonl"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="surrogateescape")
+                masked, hits = smap.mask(text)
+                if not hits:
+                    continue
+                # Write through a temp file in the same directory: a crash
+                # mid-rewrite must not leave a half-masked transcript.
+                tmp = path.with_suffix(".jsonl.remask")
+                tmp.write_text(masked, encoding="utf-8", errors="surrogateescape")
+                tmp.replace(path)
+                changed += 1
+                masked_total += hits
+            except OSError as failure:
+                print(f"claude-recall: remask failed for {path}: {failure}",
+                      file=sys.stderr)
+    return {"files_rewritten": changed, "secrets_masked": masked_total}
+
+
 def owner_of(hub, file_path: str) -> str | None:
     """Which member a stored transcript belongs to.
 

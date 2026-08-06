@@ -214,3 +214,35 @@ def test_digest_dates_are_human_readable(hub):
     result = hub_ask.answer(hub, "как чинили CI?", composer=None)
     assert result["sources"][0]["when_human"].strip()
     assert "()" not in result["answer"]
+
+
+def test_remask_rewrites_what_was_stored_before_the_map_was_fixed(tmp_path):
+    """Masking runs at ingest, so a map fixed afterwards must be applicable to
+    bytes already on disk — re-uploading gigabytes to fix a regex is absurd."""
+    from session_recall.hub import storage
+    from session_recall.hub.indexer import remask_all
+    from session_recall.hub.masking import SecretMap
+
+    hub = Hub(tmp_path / "hub", recall_factory=lambda: FakeRecall())
+    secret = "Xk39dmPQ7wLz2vRt"
+    rel = "claude/-Users-egor-proj/s1.jsonl"
+    ledger = hub.ledger
+    storage.append(hub.transcripts, "egor", rel, 0,
+                   f'{{"text":"pass {secret}"}}\n'.encode(), ledger)
+    before = ledger.read("egor")[rel]
+
+    SecretMap.build({"servers/NETCUP_PASSWORD": secret},
+                    salt="s").save(hub.secrets_path)
+    result = remask_all(hub)
+
+    stored = storage.resolve(hub.transcripts, "egor", rel).read_text()
+    assert result["files_rewritten"] == 1 and result["secrets_masked"] == 1
+    assert secret not in stored and "${servers/NETCUP_PASSWORD}" in stored
+    # the ledger counts the CLIENT's bytes, which a rewrite does not change
+    assert ledger.read("egor")[rel] == before
+
+
+def test_remask_without_a_map_does_nothing(tmp_path):
+    from session_recall.hub.indexer import remask_all
+    hub = Hub(tmp_path / "hub2", recall_factory=lambda: FakeRecall())
+    assert "skipped" in remask_all(hub)

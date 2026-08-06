@@ -49,6 +49,8 @@ def add_parser(sub) -> None:
     kr.add_argument("selector")
 
     hsub.add_parser("index", help="index everything members have uploaded")
+    hsub.add_parser("remask",
+                    help="re-apply the current masking map to stored transcripts")
 
     # --- member side ---------------------------------------------------
     jp = hsub.add_parser("join", help="connect this machine to a team hub")
@@ -208,6 +210,11 @@ def run(args) -> int:
     if args.hub_cmd == "index":
         from .indexer import index_all
         print(json.dumps(index_all(hub), indent=2))
+        return 0
+
+    if args.hub_cmd == "remask":
+        from .indexer import remask_all
+        print(json.dumps(remask_all(hub), indent=2))
         return 0
 
     if args.hub_cmd == "ask":

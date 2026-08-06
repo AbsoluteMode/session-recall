@@ -129,3 +129,32 @@ def test_model_names_survive_masking_end_to_end():
     masked, hits = smap.mask(text)
     assert "claude-opus-4-20260101" in masked      # configuration stays readable
     assert NETCUP not in masked and hits == 1
+
+
+def test_secret_right_after_an_escaped_newline_is_masked():
+    """Found in production: transcripts are JSON, so a newline is the two
+    characters `\\` and `n`. The backslash ends a token but the `n` glues onto
+    what follows, so a key written after a line break tokenised as `n<key>`
+    and matched nothing — one real API key survived masking this way."""
+    smap = build(**{"session-recall/VOYAGE_API_KEY": ANTHROPIC})
+    raw = json.dumps({"text": f"замени в doppler\n\n{ANTHROPIC}"})
+    assert "\\n\\n" + ANTHROPIC in raw          # the shape that leaked
+    masked, hits = smap.mask(raw)
+    assert ANTHROPIC not in masked and hits == 1
+    assert "${session-recall/VOYAGE_API_KEY}" in masked
+
+
+def test_other_json_escapes_glue_the_same_way():
+    smap = build(**{"a/API_KEY": ANTHROPIC})
+    for escape in ("\\t", "\\r", "\\b", "\\f"):
+        masked, hits = smap.mask(f'"{escape}{ANTHROPIC}"')
+        assert ANTHROPIC not in masked, escape
+        assert hits == 1, escape
+
+
+def test_a_real_word_before_a_secret_is_not_stripped():
+    """Only an escape letter after a backslash is peeled — an ordinary prefix
+    must not be, or the map would start matching things it should not."""
+    smap = build(**{"a/API_KEY": ANTHROPIC})
+    masked, hits = smap.mask(f"prefix{ANTHROPIC}")
+    assert hits == 0 and masked == f"prefix{ANTHROPIC}"

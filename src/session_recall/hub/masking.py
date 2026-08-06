@@ -72,6 +72,27 @@ _ALPHABETS = (
 )
 _TRIM = "-._=+/~"
 
+# Transcripts are JSON, so a newline inside a string is the two characters
+# `\` and `n`. The backslash is not in any alphabet above and ends a token,
+# but the `n` IS, which glues it to whatever follows: a secret written right
+# after a line break tokenises as `n<secret>` and matches nothing. Found in
+# production — one real API key survived masking this way, in a message that
+# read "вот замени в doppler…\n\n<key>". Same for \t, \r, \b, \f.
+_JSON_ESCAPE_LETTERS = "ntrbf"
+
+
+def _candidates(token: str, text: str, start: int) -> list[str]:
+    """Forms of `token` worth testing against the secret map.
+
+    Extra candidates are free: matching is by exact hash, so a form that is
+    not a secret simply misses. Missing a form, by contrast, leaks.
+    """
+    forms = [token, token.strip(_TRIM)]
+    if start > 0 and text[start - 1] == "\\" and token[0] in _JSON_ESCAPE_LETTERS:
+        forms.append(token[1:])
+        forms.append(token[1:].strip(_TRIM))
+    return [f for f in forms if len(f) >= MIN_LENGTH]
+
 
 def maskable(name: str, value: str) -> bool:
     """Is this Doppler entry a credential worth masking on sight?
@@ -161,11 +182,7 @@ class SecretMap:
             def swap(match: re.Match) -> str:
                 nonlocal hits
                 token = match.group(0)
-                # A token may sit inside punctuation that the widest alphabet
-                # swallowed; try the trimmed form too before giving up.
-                for candidate in (token, token.strip(_TRIM)):
-                    if len(candidate) < MIN_LENGTH:
-                        continue
+                for candidate in _candidates(token, match.string, match.start()):
                     label = self.labels.get(self._digest(self.salt, candidate))
                     if label:
                         hits += 1
