@@ -95,11 +95,14 @@ class Hub:
             return self._secret_map
 
     def _build_recall(self) -> Recall:
-        store = Store(self.db_path)
-        # WAL lets the indexer commit while searches read; the busy timeout
-        # covers the brief exclusive moments (checkpoint, schema) rather than
-        # surfacing them to a caller as "database is locked".
-        store.db.execute("PRAGMA journal_mode=WAL")
+        # The service is a READER, never a writer: the indexer owns writes.
+        # Anything else and sqlite-vec's shadow tables lose the indexer's
+        # writes — measured, not theoretical (see Store.__init__).
+        if not self.db_path.exists():
+            # A hub with nothing indexed yet has no file to open read-only.
+            # Create the schema once, then drop the writable handle.
+            Store(self.db_path).close()
+        store = Store(self.db_path, read_only=True)
         store.db.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
         return Recall(store, make_embedder(), make_reranker())
 
