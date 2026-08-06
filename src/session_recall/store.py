@@ -19,13 +19,26 @@ _INT_COLS = {"ts", "byte_offset", "byte_len", "turn_index"}
 
 
 class Store:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, read_only: bool = False):
+        """`read_only` opens the index for search only.
+
+        A hub runs two processes against one database: the HTTP service reads,
+        a timer indexes. sqlite-vec keeps its vectors in shadow tables, and a
+        long-lived read-write connection from the service made the indexer's
+        writes fail with "could not write to vector blob" — 63 transcripts
+        were silently dropped from one real run before this was found. A
+        read-only connection cannot take part in that: one writer, many
+        readers, which is what SQLite is actually good at."""
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(db_path))
+        if read_only:
+            self.db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
+        else:
+            self.db = sqlite3.connect(str(db_path))
         self.db.enable_load_extension(True)
         sqlite_vec.load(self.db)
         self.db.enable_load_extension(False)
-        self._schema()
+        if not read_only:
+            self._schema()
         self._assert_dim_matches(db_path)
 
     def _assert_dim_matches(self, db_path: Path) -> None:

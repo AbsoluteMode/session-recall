@@ -369,3 +369,30 @@ def test_corpus_summary_reports_what_was_actually_indexed(tmp_path):
     assert out["span_days"] == 2
     assert out["top_projects"][0] == ("proj-a", 2), "busiest project first, with its chunk count"
     s.close()
+
+
+def test_read_only_store_searches_but_never_writes(tmp_path):
+    """A hub's service reads while its indexer writes. A read-write connection
+    from the reader made sqlite-vec drop the writer's vectors ("could not write
+    to vector blob"), losing 63 transcripts in one real run."""
+    import pytest
+    from session_recall.config import EMBED_DIM
+
+    path = tmp_path / "index.db"
+    writer = Store(path)
+    chunk = Chunk(session_id="s1", uuid="u1", role="user", text="doppler маскировка",
+                  project="p", cwd="/tmp/p", git_branch="main", ts=1785000000,
+                  file_path=str(tmp_path / "t.jsonl"), byte_offset=0, byte_len=10,
+                  turn_index=0, content_hash="h1", source="claude")
+    writer.add(chunk, [0.01] * EMBED_DIM)
+    writer.commit()
+    writer.close()
+
+    reader = Store(path, read_only=True)
+    assert reader.knn([0.01] * EMBED_DIM, 3)          # vector search works
+    assert reader.fts("doppler", 3)                   # keyword search works
+    assert reader.get_chunk(1).text == "doppler маскировка"
+    with pytest.raises(Exception):                    # and writes are refused
+        reader.add(chunk, [0.02] * EMBED_DIM)
+        reader.commit()
+    reader.db.close()

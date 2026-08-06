@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 from . import config
 from .store import Store, corpus_summary
@@ -112,16 +113,39 @@ def main(argv=None):
     pp = sub.add_parser("prune")  # drop rows for transcripts deleted from disk
     pp.add_argument("--source", choices=("claude", "codex", "cursor"))
     sub.add_parser("health")  # is recall actually working right now?
+    # What the SessionStart hook calls. One command whose meaning follows the
+    # install: keep the local index fresh, or push to the team hub. The hook
+    # must not have to know which mode this machine is in.
+    sub.add_parser("sync")
     from .share import cli as share_cli
     share_cli.add_parser(sub)
     from .metadocs import cli as metadocs_cli
     metadocs_cli.add_parser(sub)
+    from .hub import cli as hub_cli
+    hub_cli.add_parser(sub)
     from . import onboarding
     onboarding.add_parser(sub)
     args = parser.parse_args(argv)
 
     if args.cmd == "share":  # no Store: share state lives outside the index DB
         return share_cli.run(args)
+    if args.cmd == "hub":  # own data directory, never the local index
+        return hub_cli.run(args)
+    if args.cmd == "sync":
+        from .hub.client import HubConfig, HubError, push
+        cfg = HubConfig.load()
+        if cfg is None:
+            # Solo install: sync IS the old index run, unchanged. Re-entering
+            # main() keeps that one behaviour defined in exactly one place.
+            return main(["index"])
+        try:
+            stats = push(cfg)
+        except HubError as failure:
+            print(f"session-recall: hub push failed: {failure}", file=sys.stderr)
+            return 1
+        print(f"pushed {stats['files']} transcript(s), "
+              f"{stats['uploaded_bytes']} B, {stats['redacted']} secret(s) redacted")
+        return 1 if stats["failed"] else 0
     if args.cmd == "metadocs":  # reads the index read-only via plain sqlite3
         return metadocs_cli.run(args)
     if args.cmd == "setup":  # indexes via a child process (fresh env resolve)

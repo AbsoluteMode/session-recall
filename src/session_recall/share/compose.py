@@ -21,6 +21,7 @@ import tempfile
 from typing import Callable
 
 MODEL = "claude-opus-5"
+CODEX_MODEL = "gpt-5.6-terra"
 MAX_TOKENS = 4000
 CLI_TIMEOUT_S = 180
 
@@ -88,7 +89,7 @@ def _prompt(req: dict, chunks: list, turns: list | None = None) -> str:
         "Write the answer.")
 
 
-def _cli_composer(runner=None) -> Composer:
+def _cli_composer(runner=None, system_extra: str = "") -> Composer:
     """Compose through the locally installed `claude` CLI.
 
     Costs nothing beyond the existing subscription and needs no API key, but the
@@ -120,7 +121,7 @@ def _cli_composer(runner=None) -> Composer:
                     "claude", "-p",
                     "--tools", "",
                     "--strict-mcp-config",
-                    "--system-prompt", _SYSTEM,
+                    "--system-prompt", _SYSTEM + system_extra,
                     _prompt(req, chunks, turns),
                 ], empty)
             except (OSError, subprocess.SubprocessError):
@@ -132,7 +133,95 @@ def _cli_composer(runner=None) -> Composer:
     return compose
 
 
-def _api_composer(client=None) -> Composer | None:
+# Present in the environment, these route codex away from the signed-in
+# subscription and onto metered API billing.
+_API_ROUTING_VARS = ("OPENAI_API_KEY", "OPENAI_BASE_URL")
+
+
+def _subscription_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in _API_ROUTING_VARS}
+
+
+def _codex_composer(runner=None, model: str | None = None,
+                    system_extra: str = "") -> Composer:
+    """Compose through the locally installed `codex` CLI.
+
+    Same bargain as the Claude CLI path — an existing subscription instead of
+    an API key — but Codex needs more stripping, because `codex exec` is a full
+    agent with a shell:
+
+    - `--ephemeral` keeps the run out of `$CODEX_HOME/sessions`. This is not
+      tidiness: a hub indexes what it stores, so a persisted worker session
+      would put a colleague's question into the team index, where it later
+      reads as the team's own past work and fires as a stored injection. The
+      Claude CLI path documents this hazard and leaves it to the operator;
+      here it is closed by construction.
+    - `--ignore-user-config` and `--ignore-rules` drop the operator's hooks,
+      notifications and execpolicy. On a laptop those merely pollute stdout;
+      on a server they are someone else's automation running inside an
+      answer to an untrusted question.
+    - `--sandbox read-only` plus an empty working directory removes writes.
+      Reads are NOT removed — the CLI exposes no flag for that — so the
+      remaining containment is the unix user the hub runs this as. That is a
+      deployment property, not a code one, and the hub's service unit is
+      where it gets enforced.
+
+    The model is passed explicitly because `--ignore-user-config` also drops
+    the configured default; a service should not inherit whatever an operator
+    last set for themselves anyway.
+
+    **Subscription, never an API key.** Codex authenticates from
+    `$CODEX_HOME/auth.json` (which `--ignore-user-config` deliberately still
+    reads), but an `OPENAI_API_KEY` in the environment would silently divert
+    the run to metered API billing instead. The variable is therefore stripped
+    from the child environment: on a server that answers a whole team, the
+    difference between "subscription" and "API" is a bill nobody agreed to.
+    """
+    model = model or os.environ.get("SESSION_RECALL_COMPOSE_MODEL") or CODEX_MODEL
+
+    def run(args, cwd, env):
+        return subprocess.run(args, cwd=cwd, env=env, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL,
+                              timeout=CLI_TIMEOUT_S)
+
+    runner = runner or run
+
+    def compose(req: dict, chunks: list, turns: list | None = None) -> str | None:
+        if not chunks:
+            return None
+        with tempfile.TemporaryDirectory() as empty:
+            answer = os.path.join(empty, "answer.txt")
+            try:
+                done = runner([
+                    "codex", "exec",
+                    "--ephemeral",
+                    "--ignore-user-config",
+                    "--ignore-rules",
+                    "--skip-git-repo-check",
+                    "--sandbox", "read-only",
+                    "-C", empty,
+                    "-m", model,
+                    "-o", answer,
+                    # No --system-prompt in codex exec: the instructions ride
+                    # at the head of the prompt, above the untrusted material.
+                    f"{_SYSTEM}{system_extra}\n\n{_prompt(req, chunks, turns)}",
+                ], empty, _subscription_env())
+            except (OSError, subprocess.SubprocessError):
+                return None
+            if getattr(done, "returncode", 1) != 0:
+                return None
+            # Read the last message from the file rather than stdout: stdout
+            # carries event logs and a token tally around the answer.
+            try:
+                with open(answer, encoding="utf-8") as fh:
+                    return fh.read().strip() or None
+            except OSError:
+                return None
+
+    return compose
+
+
+def _api_composer(client=None, system_extra: str = "") -> Composer | None:
     if client is None:
         try:
             import anthropic
@@ -149,7 +238,7 @@ def _api_composer(client=None) -> Composer | None:
                 max_tokens=MAX_TOKENS,
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
-                system=_SYSTEM,
+                system=_SYSTEM + system_extra,
                 messages=[{"role": "user",
                            "content": _prompt(req, chunks, turns)}],
             )
@@ -163,14 +252,20 @@ def _api_composer(client=None) -> Composer | None:
     return compose
 
 
-def make_composer(env: dict | None = None, client=None, runner=None) -> Composer | None:
+def make_composer(env: dict | None = None, client=None, runner=None,
+                  system_extra: str = "") -> Composer | None:
     """None means "no composer configured" — the caller keeps the deterministic
     digest. `client`/`runner` are injectable so tests never touch the network or
-    spawn a process."""
+    spawn a process. `system_extra` appends caller-specific rules to the shared
+    system prompt — the team hub uses it to add its privacy rule without
+    forking the whole prompt."""
     env = os.environ if env is None else env
     engine = (env.get("SESSION_RECALL_COMPOSE") or "none").strip().lower()
     if engine in ("claude-cli", "cli"):
-        return _cli_composer(runner=runner)
+        return _cli_composer(runner=runner, system_extra=system_extra)
     if engine in ("claude", "api", "claude-api"):
-        return _api_composer(client=client)
+        return _api_composer(client=client, system_extra=system_extra)
+    if engine in ("codex", "codex-cli"):
+        return _codex_composer(runner=runner, system_extra=system_extra,
+                               model=env.get("SESSION_RECALL_COMPOSE_MODEL"))
     return None

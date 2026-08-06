@@ -8,10 +8,13 @@ import os
 from pathlib import Path
 
 
-def acquire_lock(data_dir: Path) -> int | None:
-    """Returns the fd holding the lock, or None when another run owns it."""
+def acquire_lock(data_dir: Path, name: str = "metadocs.lock") -> int | None:
+    """Returns the fd holding the lock, or None when another run owns it.
+
+    `name` lets a second long-running job (the hub indexer) take its own lock
+    with the same semantics instead of copying this file."""
     data_dir.mkdir(parents=True, exist_ok=True)
-    fd = os.open(data_dir / "metadocs.lock", os.O_CREAT | os.O_WRONLY, 0o600)
+    fd = os.open(data_dir / name, os.O_CREAT | os.O_WRONLY, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:

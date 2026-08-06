@@ -1,6 +1,6 @@
 [project]
 name = "session-recall"
-version = "0.5.0"
+version = "0.6.0"
 description = "Semantic recall over your local Claude Code, Codex, and Cursor history — one shared index, searchable by meaning"
 readme = "README.md"
 requires-python = ">=3.11"
