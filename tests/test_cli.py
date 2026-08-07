@@ -93,6 +93,35 @@ def test_cli_cursor_schema_failure_keeps_other_sources(tmp_path, monkeypatch, ca
     store.close()
 
 
+def test_sync_steps_aside_while_another_sync_holds_the_lock(tmp_path, monkeypatch,
+                                                            capsys):
+    """SessionStart fires `sync`, and sessions overlap. The guard has to live in
+    the CLI: the hook is a shell string, and its old `pgrep` test silently did
+    nothing on Windows, where two indexers then fought over one SQLite file."""
+    from session_recall.metadocs.lock import acquire_lock, release_lock
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    held = acquire_lock(config.DATA_DIR, "sync.lock")
+    assert held is not None
+    try:
+        assert cli.main(["sync"]) == 0        # stepping aside is success
+        assert "already running" in capsys.readouterr().out
+    finally:
+        release_lock(held)
+
+    # lock free again → sync runs for real (solo install: falls through to index)
+    monkeypatch.setattr(config, "CLAUDE_PROJECTS", tmp_path / "no-projects")
+    monkeypatch.setattr(config, "CODEX_SESSIONS", tmp_path / "no-codex-sessions")
+    monkeypatch.setattr(config, "CODEX_ARCHIVED_SESSIONS", tmp_path / "no-archive")
+    monkeypatch.setattr(config, "CURSOR_DB", tmp_path / "no-cursor.db")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "sync.db")
+    monkeypatch.setattr(cli, "make_embedder", lambda: FakeEmbedder())
+    monkeypatch.setattr("session_recall.hub.client.HubConfig.load",
+                        classmethod(lambda cls, path=None: None))
+    assert cli.main(["sync"]) == 0
+    assert "indexed" in capsys.readouterr().out
+
+
 def test_cli_module_entrypoint_runs_main():
     # Regression: `python -m session_recall.cli` must invoke main(), not no-op.
     # A missing __main__ guard once made `index` silently do nothing (no DB).

@@ -23,6 +23,22 @@ def test_codex_roots_follow_codex_home(monkeypatch, tmp_path):
         assert config.CODEX_ARCHIVED_SESSIONS == tmp_path / "custom-codex" / "archived_sessions"
     importlib.reload(config)
 
+def test_cursor_db_follows_each_platform_own_app_data_dir():
+    """Cursor stores its state where its VS Code base does. Reading `~/.config`
+    on Windows found nothing and reported `sources: missing cursor` while the
+    file sat in %APPDATA% the whole time."""
+    mac = config._default_cursor_db("darwin", {})
+    win = config._default_cursor_db("win32", {"APPDATA": r"C:\Users\egor\AppData\Roaming"})
+    linux = config._default_cursor_db("linux", {"XDG_CONFIG_HOME": "/home/egor/.config"})
+
+    assert mac.parts[-5:] == ("Application Support", "Cursor", "User",
+                              "globalStorage", "state.vscdb")
+    assert win == Path(r"C:\Users\egor\AppData\Roaming") / "Cursor" / "User" \
+        / "globalStorage" / "state.vscdb"
+    assert linux == Path("/home/egor/.config") / "Cursor" / "User" \
+        / "globalStorage" / "state.vscdb"
+
+
 def test_chunk_dataclass():
     c = Chunk(session_id="s", uuid="u", role="user", text="hi", project="p",
               cwd="/c", git_branch="b", ts=1, file_path="/f.jsonl",

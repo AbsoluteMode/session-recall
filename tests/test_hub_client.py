@@ -3,8 +3,10 @@ together, so these run the actual server on an ephemeral port."""
 
 import json
 import stat
+import sys
 import threading
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,7 @@ from session_recall.hub.app import Hub, make_handler
 from session_recall.hub.client import (CONSENT, HubConfig, HubError, join,
                                        local_files, push)
 from session_recall.hub.masking import SecretMap
+from session_recall.perms import exposure
 
 ANTHROPIC = "sk-ant-api03-" + "B" * 40
 NETCUP = "Xk39dmPQ7wLz2vRt"
@@ -34,16 +37,22 @@ def url(hub):
 
 @pytest.fixture
 def roots(tmp_path):
-    """A miniature version of the three local transcript roots."""
+    """A miniature version of the three local transcript roots.
+
+    Written as real transcripts are — utf-8, LF, no locale in the loop — so the
+    byte counts these tests assert on mean the same thing on every platform."""
+    def transcript(path: Path, line: str) -> None:
+        path.write_text(line, encoding="utf-8", newline="")
+
     claude = tmp_path / "claude-projects" / "-Users-egor-proj"
     claude.mkdir(parents=True)
-    (claude / "sess-a.jsonl").write_text('{"type":"user","text":"привет"}\n')
+    transcript(claude / "sess-a.jsonl", '{"type":"user","text":"привет"}\n')
     codex = tmp_path / "codex-sessions" / "2026" / "08" / "05"
     codex.mkdir(parents=True)
-    (codex / "roll-1.jsonl").write_text('{"type":"message","text":"codex"}\n')
+    transcript(codex / "roll-1.jsonl", '{"type":"message","text":"codex"}\n')
     archive = tmp_path / "codex-archive"
     archive.mkdir()
-    (archive / "old.jsonl").write_text('{"type":"message","text":"old"}\n')
+    transcript(archive / "old.jsonl", '{"type":"message","text":"old"}\n')
     return {"claude_root": tmp_path / "claude-projects",
             "codex_sessions": tmp_path / "codex-sessions",
             "codex_archive": archive}
@@ -72,9 +81,15 @@ def test_join_verifies_the_key_before_saving(url, hub, tmp_path):
 
 
 def test_join_stores_the_key_readable_only_by_its_owner(url, hub, tmp_path):
+    """Asserted through `perms.exposure` rather than the mode directly, because
+    the mechanism differs: POSIX makes the file 0600, Windows has no per-file
+    mode and relies on the profile directory's ACL. The property — nobody else
+    can read the key — is the same on both, so the test is too."""
     path = tmp_path / "hub.json"
     join(url, hub.keys.issue("egor"), path=path)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert exposure(path, private_root=tmp_path) is None
+    if not sys.platform.startswith("win"):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert HubConfig.load(path).url == url
 
 
@@ -95,7 +110,11 @@ def test_push_sends_only_the_tail_of_a_grown_transcript(cfg, hub, roots):
     push(cfg, roots=roots)
     grown = roots["claude_root"] / "-Users-egor-proj" / "sess-a.jsonl"
     addition = '{"type":"assistant","text":"ответ"}\n'
-    with open(grown, "a") as fh:
+    # explicit utf-8 and no newline translation: a transcript is counted in
+    # BYTES here, and Windows text mode would silently spend a locale codepage
+    # and an extra \r on every line, so the assertions below would measure the
+    # test's own encoding rather than what push sent
+    with open(grown, "a", encoding="utf-8", newline="") as fh:
         fh.write(addition)
 
     stats = push(cfg, roots=roots)
@@ -103,29 +122,31 @@ def test_push_sends_only_the_tail_of_a_grown_transcript(cfg, hub, roots):
     assert stats["uploaded_bytes"] == len(addition.encode())
     stored = storage.resolve(hub.transcripts, "egor",
                              "claude/-Users-egor-proj/sess-a.jsonl")
-    assert stored.read_text().endswith(addition)
+    assert stored.read_text(encoding="utf-8").endswith(addition)
 
 
 def test_a_rewritten_transcript_is_resent_whole(cfg, hub, roots):
     push(cfg, roots=roots)
     rewritten = roots["claude_root"] / "-Users-egor-proj" / "sess-a.jsonl"
-    rewritten.write_text('{"short":1}\n')          # now SHORTER than the hub's copy
+    rewritten.write_text('{"short":1}\n', encoding="utf-8", newline="")
 
     push(cfg, roots=roots)
     stored = storage.resolve(hub.transcripts, "egor",
                              "claude/-Users-egor-proj/sess-a.jsonl")
-    assert stored.read_text() == '{"short":1}\n'
+    assert stored.read_text(encoding="utf-8") == '{"short":1}\n'
 
 
 def test_format_shaped_secrets_never_leave_the_machine(cfg, hub, roots):
     """Client-side redaction is the first layer: an API key is cut before the
     request is built, so it is not merely masked on arrival — it never travels."""
     leaky = roots["claude_root"] / "-Users-egor-proj" / "sess-a.jsonl"
-    leaky.write_text(json.dumps({"text": f"key is {ANTHROPIC}"}) + "\n")
+    leaky.write_text(json.dumps({"text": f"key is {ANTHROPIC}"}) + "\n",
+                     encoding="utf-8", newline="")
 
     stats = push(cfg, roots=roots)
-    stored = storage.resolve(hub.transcripts, "egor",
-                             "claude/-Users-egor-proj/sess-a.jsonl").read_text()
+    stored = storage.resolve(
+        hub.transcripts, "egor",
+        "claude/-Users-egor-proj/sess-a.jsonl").read_text(encoding="utf-8")
     assert stats["redacted"] == 1
     assert ANTHROPIC not in stored and "[REDACTED:anthropic-key]" in stored
 
@@ -135,7 +156,7 @@ def test_redaction_keeps_the_resume_point_aligned(cfg, hub, roots):
     otherwise the next push re-sends from a wrong offset forever."""
     leaky = roots["claude_root"] / "-Users-egor-proj" / "sess-a.jsonl"
     line = json.dumps({"text": f"key is {ANTHROPIC}"}) + "\n"
-    leaky.write_text(line)
+    leaky.write_text(line, encoding="utf-8", newline="")
     push(cfg, roots=roots)
 
     rel = "claude/-Users-egor-proj/sess-a.jsonl"

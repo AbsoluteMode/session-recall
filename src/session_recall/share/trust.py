@@ -67,7 +67,7 @@ class TrustStore:
     def __init__(self, path: Path):
         self.path = path
         if path.exists():
-            raw = json.loads(path.read_text())
+            raw = json.loads(path.read_text(encoding="utf-8"))
             self._state = _State(
                 peers=[Peer(**p) for p in raw.get("peers", [])],
                 allowed_projects=list(raw.get("allowed_projects", [])),
@@ -82,7 +82,7 @@ class TrustStore:
         tmp = self.path.with_suffix(".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                      stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"peers": [asdict(p) for p in self._state.peers],
                        "allowed_projects": self._state.allowed_projects,
                        "paused": self._state.paused}, f, indent=2)

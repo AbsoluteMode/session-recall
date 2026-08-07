@@ -84,7 +84,7 @@ def _write_candidate(share_dir: Path, cand: Candidate) -> Path:
     path = _outbox(share_dir) / f"{cand.id}.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                  stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(asdict(cand), f, indent=2, ensure_ascii=False)
     return path
 
@@ -184,7 +184,7 @@ def list_pending(share_dir: Path) -> list[Candidate]:
         return []
     out = []
     for p in sorted(d.glob("*.json")):
-        cand = Candidate(**json.loads(p.read_text()))
+        cand = Candidate(**json.loads(p.read_text(encoding="utf-8")))
         if cand.status == "pending":
             out.append(cand)
     return out
@@ -192,7 +192,7 @@ def list_pending(share_dir: Path) -> list[Candidate]:
 
 def load_candidate(share_dir: Path, cand_id: str) -> Candidate | None:
     p = share_dir / OUTBOX_DIR / f"{cand_id}.json"
-    return Candidate(**json.loads(p.read_text())) if p.exists() else None
+    return Candidate(**json.loads(p.read_text(encoding="utf-8"))) if p.exists() else None
 
 
 def set_status(share_dir: Path, cand_id: str, status: str) -> Candidate | None:

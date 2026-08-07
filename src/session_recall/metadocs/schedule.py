@@ -113,7 +113,7 @@ def _systemd_enable(daily_at: str, log_path: Path, runner) -> Path:
     d = systemd_dir()
     d.mkdir(parents=True, exist_ok=True)
     for name, text in build_units(daily_at, log_path).items():
-        (d / name).write_text(text)
+        (d / name).write_text(text, encoding="utf-8")
     runner(["systemctl", "--user", "daemon-reload"])
     done = runner(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"])
     if done.returncode != 0:

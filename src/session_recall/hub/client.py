@@ -75,7 +75,7 @@ class HubConfig:
     @classmethod
     def load(cls, path: Path | None = None) -> "HubConfig | None":
         try:
-            data = json.loads(Path(path or CONFIG_PATH).read_text())
+            data = json.loads(Path(path or CONFIG_PATH).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
         if not data.get("url") or not data.get("key"):
@@ -89,7 +89,7 @@ class HubConfig:
         # 0600 before the key is written, not after: a world-readable moment
         # is all it takes on a shared machine.
         fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump({"url": self.url, "key": self.key,
                        "consented": self.consented}, fh, indent=2)
 

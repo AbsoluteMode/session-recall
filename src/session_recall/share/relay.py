@@ -50,7 +50,7 @@ class RelayStore:
         self.clock = clock
         self._addrs_path = self.root / "addrs.json"
         self.addrs: dict[str, str] = (
-            json.loads(self._addrs_path.read_text()) if self._addrs_path.exists() else {})
+            json.loads(self._addrs_path.read_text(encoding="utf-8")) if self._addrs_path.exists() else {})
 
     def _prune(self, directory: Path, ttl: float) -> None:
         if not directory.is_dir():
@@ -107,7 +107,7 @@ class RelayStore:
         if known is None:
             self.addrs[address] = pk_b64
             self.root.mkdir(parents=True, exist_ok=True)
-            self._addrs_path.write_text(json.dumps(self.addrs))
+            self._addrs_path.write_text(json.dumps(self.addrs), encoding="utf-8")
         return True
 
 

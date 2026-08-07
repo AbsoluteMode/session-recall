@@ -61,7 +61,7 @@ def index_metadocs(store: Store, embedder, repo: Path) -> int:
         sig = f"{_SIG_TAG}:{_embed_fp()}:{int(st.st_mtime)}:{st.st_size}"
         if store.is_indexed(str(path), sig):
             continue
-        entry = entries.parse(path.read_text())
+        entry = entries.parse(path.read_text(encoding="utf-8"))
         if entry is None:
             continue          # half-written or foreign file: skip, no marker
         text = f"{entry.title}\n\n{entry.body}"

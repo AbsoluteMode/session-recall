@@ -121,7 +121,7 @@ def cli_agent_distiller(repo: str, model: str = "", runner=None) -> Distiller:
         with tempfile.TemporaryDirectory() as empty:
             cfg_path = Path(empty) / "mcp.json"
             cfg_path.write_text(json.dumps(
-                _mcp_config(repo, project, session_key)))
+                _mcp_config(repo, project, session_key)), encoding="utf-8")
             argv = [shutil.which("claude") or "claude", "-p",
                     "--no-session-persistence",
                     "--mcp-config", str(cfg_path),

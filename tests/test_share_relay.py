@@ -84,9 +84,14 @@ def test_stale_fetch_signature_rejected(server, users, monkeypatch):
 
 
 def test_oversized_blob_rejected(server):
+    """The relay answers 413 and hangs up without draining the oversized body —
+    which is the point of the cap. Whether the client then reads that response
+    or just sees the reset is the OS's call: Linux delivers the 413, Windows
+    aborts the connection (WinError 10053). Rejection is the invariant; which
+    error carries it is not."""
     url, _ = server
     t = HttpRelayTransport(url)
-    with pytest.raises(urllib.error.HTTPError):
+    with pytest.raises((urllib.error.HTTPError, ConnectionError)):
         t.put_slot("pair-a-big", b"x" * (relay.MAX_BLOB + 1))
 
 

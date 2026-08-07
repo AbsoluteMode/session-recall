@@ -35,7 +35,7 @@ class ShareState:
     def __init__(self, path: Path):
         self.path = path
         if path.exists():
-            raw = json.loads(path.read_text())
+            raw = json.loads(path.read_text(encoding="utf-8"))
             self.seen: dict[str, float] = raw.get("seen", {})
             self.rate: dict[str, list[float]] = raw.get("rate", {})
         else:
@@ -46,7 +46,7 @@ class ShareState:
         tmp = self.path.with_suffix(".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                      stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"seen": self.seen, "rate": self.rate}, f)
         os.replace(tmp, self.path)
 

@@ -1,7 +1,9 @@
+import sys
 import time
 
 import pytest
 
+from session_recall.perms import exposure
 from session_recall.share import identity as identity_mod
 from session_recall.share import pairing
 from session_recall.share.pairing import PairingError
@@ -75,9 +77,14 @@ def test_complete_without_invite(two_sides):
 
 
 def test_identity_files_are_private(two_sides):
+    """Same property on both platforms, different mechanism underneath — see
+    `perms.exposure`: mode bits where they exist, the profile directory's ACL
+    where they do not."""
     _, a_dir, _, _, _ = two_sides
-    mode = (a_dir / "identity.json").stat().st_mode
-    assert mode & 0o077 == 0, "identity must be 0600"
+    identity = a_dir / "identity.json"
+    assert exposure(identity, private_root=a_dir) is None
+    if not sys.platform.startswith("win"):
+        assert identity.stat().st_mode & 0o077 == 0, "identity must be 0600"
 
 
 def test_identity_create_refuses_overwrite(tmp_path):

@@ -20,9 +20,19 @@ CODEX_SESSIONS = CODEX_HOME / "sessions"
 CODEX_ARCHIVED_SESSIONS = CODEX_HOME / "archived_sessions"
 
 
-def _default_cursor_db() -> Path:
-    base = (Path.home() / "Library" / "Application Support"
-            if sys.platform == "darwin" else Path.home() / ".config")
+def _default_cursor_db(platform: str | None = None, env: dict | None = None) -> Path:
+    """Cursor keeps its per-user state where its VS Code base does, which is a
+    different directory on each OS — `%APPDATA%` on Windows, not `~/.config`,
+    which is why a Windows install reported `sources: missing cursor` while the
+    file sat there all along."""
+    platform = sys.platform if platform is None else platform
+    env = os.environ if env is None else env
+    if platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif platform.startswith("win"):
+        base = Path(env.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+    else:
+        base = Path(env.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
     return base / "Cursor" / "User" / "globalStorage" / "state.vscdb"
 
 
@@ -104,7 +114,7 @@ def user_lang(env: dict | None = None) -> str | None:
         return lang
     if live:
         try:
-            stored = (json.loads(SETTINGS_PATH.read_text()).get("lang") or "")
+            stored = (json.loads(SETTINGS_PATH.read_text(encoding="utf-8")).get("lang") or "")
             return stored.strip().lower() or None
         except (OSError, ValueError):
             return None

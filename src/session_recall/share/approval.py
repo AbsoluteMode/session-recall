@@ -181,7 +181,7 @@ def dispatch(identity: Identity, trust: TrustStore, share_dir: Path,
     if not d.is_dir():
         return sent
     for p in sorted(d.glob("*.json")):
-        cand = Candidate(**json.loads(p.read_text()))
+        cand = Candidate(**json.loads(p.read_text(encoding="utf-8")))
         if cand.status not in statuses:
             continue
         peer = trust.get_by_address(cand.peer_address)

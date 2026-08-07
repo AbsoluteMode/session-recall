@@ -35,12 +35,13 @@ def _store_lang(lang: str) -> None:
     settings file stays."""
     settings = {}
     try:
-        settings = json.loads(config.SETTINGS_PATH.read_text())
+        settings = json.loads(config.SETTINGS_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
     settings["lang"] = lang
     config.SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    config.SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
+    config.SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n",
+                                    encoding="utf-8")
 
 
 def _transcript_footprint() -> tuple[int, int]:

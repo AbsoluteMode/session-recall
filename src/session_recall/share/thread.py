@@ -77,7 +77,7 @@ def save(share_dir: Path, thread: Thread) -> None:
     path = _path(share_dir, thread.id)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                  stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(asdict(thread), f, indent=2, ensure_ascii=False)
 
 
@@ -85,7 +85,7 @@ def load(share_dir: Path, thread_id: str) -> Thread | None:
     path = _path(share_dir, thread_id)
     if not path.exists():
         return None
-    return Thread(**json.loads(path.read_text()))
+    return Thread(**json.loads(path.read_text(encoding="utf-8")))
 
 
 def open_or_create(share_dir: Path, thread_id: str, peer_address: str,
@@ -103,6 +103,6 @@ def listing(share_dir: Path) -> list[Thread]:
     d = share_dir / THREADS_DIR
     if not d.is_dir():
         return []
-    threads = [Thread(**json.loads(p.read_text())) for p in d.glob("*.json")]
+    threads = [Thread(**json.loads(p.read_text(encoding="utf-8"))) for p in d.glob("*.json")]
     return sorted(threads, key=lambda t: t.turns[-1]["ts"] if t.turns
                   else t.created_at, reverse=True)

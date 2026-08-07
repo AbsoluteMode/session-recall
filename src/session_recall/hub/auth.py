@@ -22,11 +22,12 @@ defend against would be ceremony.
 
 import hashlib
 import json
-import os
 import re
 import secrets
 import time
 from pathlib import Path
+
+from .. import perms
 
 _KEY_RE = re.compile(r"^sr_([a-z0-9][a-z0-9-]{0,31})_([0-9a-f]{32})$")
 _BEARER_RE = re.compile(r"^Bearer\s+(\S+)$", re.IGNORECASE)
@@ -62,15 +63,15 @@ class KeyStore:
 
     def _load(self) -> dict:
         try:
-            return json.loads(self.path.read_text())
+            return json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
 
     def _save(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
-        os.chmod(tmp, 0o600)
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        perms.protect(tmp)
         tmp.replace(self.path)   # atomic: a crash mid-write never truncates the store
 
     def issue(self, owner: str, note: str = "") -> str:
