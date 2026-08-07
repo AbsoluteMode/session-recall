@@ -1,5 +1,5 @@
 {
-  "description": "Keep the session-recall index fresh — incremental re-index in the background at session start.",
+  "description": "Keep the index fresh: a full incremental re-index at session start, plus a lightweight hub push after every turn so teammates see the session as it happens.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,28 @@
             "type": "command",
             "timeout": 10,
             "command": "export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; sr=session-recall; pgrep -f \"$sr sync\" >/dev/null 2>&1 || { command -v \"$sr\" >/dev/null 2>&1 && (\"$sr\" sync >/tmp/session-recall-index.log 2>&1 &) || echo 'session-recall: CLI not on PATH - history not synced (see README: Keeping the index fresh)' >>/tmp/session-recall-index.log; }"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "[ -f \"$HOME/.local/share/session-recall/hub.json\" ] || exit 0; export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; sr=session-recall; command -v \"$sr\" >/dev/null 2>&1 || exit 0; pgrep -f \"$sr hub push\" >/dev/null 2>&1 || (\"$sr\" hub push >>/tmp/session-recall-push.log 2>&1 &)"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "[ -f \"$HOME/.local/share/session-recall/hub.json\" ] || exit 0; export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; sr=session-recall; command -v \"$sr\" >/dev/null 2>&1 || exit 0; pgrep -f \"$sr hub push\" >/dev/null 2>&1 || (\"$sr\" hub push >>/tmp/session-recall-push.log 2>&1 &)"
           }
         ]
       }
