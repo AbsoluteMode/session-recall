@@ -47,14 +47,15 @@ def load(data_dir: Path | None = None) -> MetaConfig | None:
     p = config_path(data_dir)
     if not p.exists():
         return None
-    raw = json.loads(p.read_text())
+    raw = json.loads(p.read_text(encoding="utf-8"))
     return MetaConfig(**raw)
 
 
 def save(cfg: MetaConfig, data_dir: Path | None = None) -> None:
     p = config_path(data_dir)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(asdict(cfg), indent=2, ensure_ascii=False))
+    p.write_text(json.dumps(asdict(cfg), indent=2, ensure_ascii=False),
+                 encoding="utf-8")
 
 
 class Watermarks:
@@ -68,7 +69,7 @@ class Watermarks:
     def __init__(self, path: Path):
         self.path = path
         self.marks: dict[str, int] = (
-            json.loads(path.read_text()) if path.exists() else {})
+            json.loads(path.read_text(encoding="utf-8")) if path.exists() else {})
 
     def key(self, source: str, session_id: str) -> str:
         return f"{source}:{session_id}"
@@ -83,4 +84,4 @@ class Watermarks:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.marks))
+        self.path.write_text(json.dumps(self.marks), encoding="utf-8")

@@ -70,7 +70,7 @@ def start_invite(identity: Identity, transport, share_dir: Path) -> str:
                        _seal(key, identity.public_bundle(local)))
     (share_dir / PENDING_INVITE_FILE).write_text(json.dumps(
         {"invite_id": b32(invite_id), "key": b64(key), "local_address": local,
-         "created_at": time.time()}))
+         "created_at": time.time()}), encoding="utf-8")
     return group(b32(invite_id + key))
 
 
@@ -93,7 +93,7 @@ def complete_invite(identity: Identity, transport, share_dir: Path) -> PairingRe
     pending_path = share_dir / PENDING_INVITE_FILE
     if not pending_path.exists():
         raise PairingError("no pending invite — run `share invite` first")
-    pending = json.loads(pending_path.read_text())
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
     if time.time() - pending["created_at"] > INVITE_TTL_S:
         pending_path.unlink()
         raise PairingError("invite expired — start a fresh one")
@@ -112,13 +112,13 @@ def _finish(identity: Identity, share_dir: Path, their: dict,
     # never writes the trust store itself.
     (share_dir / PENDING_PEER_FILE).write_text(json.dumps(
         {"bundle": their, "sas": sas, "local_address": local_address,
-         "ts": time.time()}))
+         "ts": time.time()}), encoding="utf-8")
     return PairingResult(bundle=their, sas=sas)
 
 
 def pending_peer(share_dir: Path) -> dict | None:
     path = share_dir / PENDING_PEER_FILE
-    return json.loads(path.read_text()) if path.exists() else None
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
 def clear_pending_peer(share_dir: Path) -> None:

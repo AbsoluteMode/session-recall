@@ -54,8 +54,11 @@ def _run_health(store: Store) -> int:
             # is reported precisely by `index`; health must not crash and must
             # not use the global DB mtime as a fake conversation timestamp.
             pass
+    from .hub.client import CONFIG_PATH as HUB_CONFIG_PATH
+    secret_files = (HUB_CONFIG_PATH, config.DATA_DIR / "share" / "identity.json")
     report = check_all(
-        store, make_embedder(), roots, transcripts, source_timestamps)
+        store, make_embedder(), roots, transcripts, source_timestamps,
+        secret_files)
 
     width = max(len(d.name) for d in report.dimensions)
     for d in report.dimensions:
@@ -133,19 +136,34 @@ def main(argv=None):
         return hub_cli.run(args)
     if args.cmd == "sync":
         from .hub.client import HubConfig, HubError, push
-        cfg = HubConfig.load()
-        if cfg is None:
-            # Solo install: sync IS the old index run, unchanged. Re-entering
-            # main() keeps that one behaviour defined in exactly one place.
-            return main(["index"])
+        from .metadocs.lock import acquire_lock, release_lock
+        # Session start fires this, and sessions overlap: a second run racing
+        # the first used to mean two indexers fighting over one SQLite file
+        # ("database is locked") or two pushes re-uploading the same bytes. The
+        # guard lives here, not in the hook, because the hook is a shell string
+        # and no shell one-liner is portable — `pgrep` alone does not exist on
+        # Windows, where it silently degraded to no guard at all.
+        lock_fd = acquire_lock(config.DATA_DIR, "sync.lock")
+        if lock_fd is None:
+            # exit 0: the other run is doing this run's work, which is success
+            print("session-recall: a sync is already running — stepping aside")
+            return 0
         try:
-            stats = push(cfg)
-        except HubError as failure:
-            print(f"session-recall: hub push failed: {failure}", file=sys.stderr)
-            return 1
-        print(f"pushed {stats['files']} transcript(s), "
-              f"{stats['uploaded_bytes']} B, {stats['redacted']} secret(s) redacted")
-        return 1 if stats["failed"] else 0
+            cfg = HubConfig.load()
+            if cfg is None:
+                # Solo install: sync IS the old index run, unchanged. Re-entering
+                # main() keeps that one behaviour defined in exactly one place.
+                return main(["index"])
+            try:
+                stats = push(cfg)
+            except HubError as failure:
+                print(f"session-recall: hub push failed: {failure}", file=sys.stderr)
+                return 1
+            print(f"pushed {stats['files']} transcript(s), "
+                  f"{stats['uploaded_bytes']} B, {stats['redacted']} secret(s) redacted")
+            return 1 if stats["failed"] else 0
+        finally:
+            release_lock(lock_fd)
     if args.cmd == "metadocs":  # reads the index read-only via plain sqlite3
         return metadocs_cli.run(args)
     if args.cmd == "setup":  # indexes via a child process (fresh env resolve)

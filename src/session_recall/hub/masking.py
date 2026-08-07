@@ -33,12 +33,13 @@ Two deliberate limits, both of which the regex layer still covers:
 
 import hashlib
 import json
-import os
 import re
 import secrets as pysecrets
 import subprocess
 import time
 from pathlib import Path
+
+from .. import perms
 
 MIN_LENGTH = 12
 _DOPPLER_TIMEOUT_S = 30
@@ -150,7 +151,7 @@ class SecretMap:
     @classmethod
     def load(cls, path: Path) -> "SecretMap":
         try:
-            data = json.loads(Path(path).read_text())
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return cls(salt="", labels={})
         return cls(data.get("salt", ""), data.get("labels", {}),
@@ -162,8 +163,8 @@ class SecretMap:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(
             {"salt": self.salt, "labels": self.labels, "updated": self.updated},
-            indent=2, sort_keys=True))
-        os.chmod(tmp, 0o600)
+            indent=2, sort_keys=True), encoding="utf-8")
+        perms.protect(tmp)
         tmp.replace(path)
 
     def __bool__(self) -> bool:

@@ -136,6 +136,29 @@ def check_embed_space(store: Store) -> Dimension:
         "run `session-recall index` once to attest every source")
 
 
+def check_secrets(secret_files: tuple[Path, ...]) -> Dimension | None:
+    """Are the files holding keys actually private?
+
+    Worth a dimension rather than a comment because the answer depends on
+    where the data directory ended up, and nothing else in the tool would ever
+    say so. None when this machine holds no such file yet — an empty row would
+    only be noise before the first `hub join`."""
+    from .perms import exposure
+
+    present = [p for p in secret_files if Path(p).exists()]
+    if not present:
+        return None
+    leaks = [(p, why) for p in present if (why := exposure(p))]
+    if not leaks:
+        return Dimension("Key files", "GREEN",
+                         f"{len(present)} private to this account")
+    path, why = leaks[0]
+    return Dimension(
+        "Key files", "RED", f"{path.name}: {why}",
+        "move the data directory back under your home directory, or treat the "
+        "key as shared and reissue it")
+
+
 @dataclass(frozen=True)
 class Report:
     dimensions: list[Dimension]
@@ -144,7 +167,8 @@ class Report:
 
 def check_all(store: Store, embedder, roots: dict[str, Path],
               transcripts: list[Path],
-              source_timestamps: tuple[int | float, ...] = ()) -> Report:
+              source_timestamps: tuple[int | float, ...] = (),
+              secret_files: tuple[Path, ...] = ()) -> Report:
     """Every dimension plus one verdict. The verdict is the worst zone present: a
     single dead dimension makes recall untrustworthy, and averaging would hide it
     behind everything that still works."""
@@ -155,6 +179,9 @@ def check_all(store: Store, embedder, roots: dict[str, Path],
         check_corpus(store),
         check_paths(roots),
     ]
+    secrets = check_secrets(secret_files)
+    if secrets is not None:
+        dims.append(secrets)
     order = {"GREEN": 0, "AMBER": 1, "RED": 2}
     verdict = max((d.zone for d in dims), key=lambda z: order[z])
     return Report(dimensions=dims, verdict=verdict)

@@ -1,7 +1,8 @@
 # tests/test_health.py
 import time
 
-from session_recall.health import score, check_freshness, check_corpus, check_paths
+from session_recall.health import (score, check_freshness, check_corpus,
+                                   check_paths, check_secrets)
 from session_recall.models import Chunk
 from session_recall.store import Store
 
@@ -20,6 +21,23 @@ def test_score_bands_and_direction():
     assert score(2, green=50, amber=10).zone == "RED"
     assert score(1, green=24, amber=72, higher_is_better=False).zone == "GREEN"
     assert score(100, green=24, amber=72, higher_is_better=False).zone == "RED"
+
+
+def test_secrets_dimension_is_absent_before_there_is_a_key(tmp_path):
+    """A machine that never joined a hub has nothing to protect; an empty row
+    would be noise in the one place that must stay scannable."""
+    assert check_secrets((tmp_path / "hub.json",)) is None
+
+
+def test_secrets_dimension_names_the_file_that_leaks(tmp_path, monkeypatch):
+    """Nothing else in the tool would ever tell the user their key is readable,
+    which is why the answer belongs in `health` rather than in a comment."""
+    key = tmp_path / "hub.json"
+    key.write_text('{"key": "sr_egor_deadbeef"}', encoding="utf-8")
+    monkeypatch.setattr("session_recall.perms.exposure",
+                        lambda p, *a, **kw: "mode 0644 — group or other can read it")
+    dim = check_secrets((key,))
+    assert dim.zone == "RED" and "hub.json" in dim.detail and dim.hint
 
 
 def test_freshness_measures_the_gap_to_disk_not_the_index_alone(tmp_path):

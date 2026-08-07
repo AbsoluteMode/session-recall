@@ -11,7 +11,7 @@ def local_timezone():
     if env_tz:
         candidates.append(env_tz)
     try:
-        configured = Path("/etc/timezone").read_text().strip()
+        configured = Path("/etc/timezone").read_text(encoding="utf-8").strip()
         if configured:
             candidates.append(configured)
     except OSError:

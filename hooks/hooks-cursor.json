@@ -3,7 +3,7 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; sr=session-recall; pgrep -f \"$sr sync\" >/dev/null 2>&1 || { command -v \"$sr\" >/dev/null 2>&1 && (\"$sr\" sync >/tmp/session-recall-index.log 2>&1 &) || echo 'session-recall: CLI not on PATH - history not synced (see README: Keeping the index fresh)' >>/tmp/session-recall-index.log; }"
+        "command": "export PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; log=\"${TMPDIR:-/tmp}/session-recall-sync.log\"; command -v session-recall >/dev/null 2>&1 && (session-recall sync >\"$log\" 2>&1 &) || echo 'session-recall: CLI not on PATH - history not synced (see README: Keeping the index fresh)' >>\"$log\""
       }
     ]
   }

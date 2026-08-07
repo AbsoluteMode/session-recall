@@ -451,7 +451,7 @@ def workspace_folder(db_path: Path, workspace_id: str) -> tuple[str, str]:
         return "", ""
     ws = db_path.parent.parent / "workspaceStorage" / workspace_id / "workspace.json"
     try:
-        folder = json.loads(ws.read_text()).get("folder") or ""
+        folder = json.loads(ws.read_text(encoding="utf-8")).get("folder") or ""
     except (OSError, ValueError):
         return "", ""
     if folder.startswith("file://"):

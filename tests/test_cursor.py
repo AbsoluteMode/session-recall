@@ -107,7 +107,9 @@ def test_index_cursor_end_to_end_with_workspace_mapping(tmp_path):
         "SELECT role, project, cwd, source FROM chunks ORDER BY turn_index").fetchall()
     assert rows == [("user", "deploy-service", "/Users/me/deploy-service", "cursor"),
                     ("assistant", "deploy-service", "/Users/me/deploy-service", "cursor")]
-    raw = next(snapshots.glob("*.jsonl")).read_text()
+    # snapshots are written as utf-8 bytes; reading them back in the locale
+    # codepage (the Windows default) turns Cyrillic into mojibake
+    raw = next(snapshots.glob("*.jsonl")).read_text(encoding="utf-8")
     assert "Проверяю расписание крона" in raw
     assert "cursor-thinking-signature-must-not-escape" not in raw
 

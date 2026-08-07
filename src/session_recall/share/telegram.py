@@ -64,7 +64,7 @@ def load_config(share_dir: Path) -> TgConfig | None:
     p = share_dir / TG_FILE
     if not p.exists():
         return None
-    raw = json.loads(p.read_text())
+    raw = json.loads(p.read_text(encoding="utf-8"))
     return TgConfig(token=raw["token"], chat_id=raw.get("chat_id"),
                     offset=raw.get("offset", 0))
 
@@ -74,7 +74,7 @@ def save_config(share_dir: Path, cfg: TgConfig) -> None:
     p = share_dir / TG_FILE
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                  stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"token": cfg.token, "chat_id": cfg.chat_id,
                    "offset": cfg.offset}, f)
 

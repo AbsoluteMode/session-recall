@@ -6,12 +6,21 @@ rejected at the entry gate, story order survives failures, watermarks only
 advance after safe work, and the whole run is git-reviewable.
 """
 
+import json
 import os
 import sqlite3
 import subprocess
 from pathlib import Path
 
 import pytest
+
+
+def embedded(path) -> str:
+    """A path that has been serialised into JSON, ready to be looked for in the
+    serialised text. On Windows every separator comes back escaped (`\\\\`), so
+    a raw `str(path)` substring check fails against a config that is in fact
+    correct; on POSIX this returns the path unchanged."""
+    return json.dumps(str(path))[1:-1]
 
 from session_recall.metadocs import agent_server, collect, distill, entries
 from session_recall.metadocs import run as run_mod
@@ -112,8 +121,10 @@ def test_migration_splits_old_format(repo):
     (repo / "proj").mkdir()
     (repo / "proj" / "bugs.md").write_text(
         "# Bugs\n\n## Первый баг\nтело один\nsources: claude:s1\n\n"
-        "## Второй баг\nтело два\nsources: claude:s2, codex:s3\n")
-    (repo / "USER.md").write_text("# Карта\n\n## Транскрипты\nлежат в ~/.claude\n")
+        "## Второй баг\nтело два\nsources: claude:s2, codex:s3\n",
+        encoding="utf-8")
+    (repo / "USER.md").write_text("# Карта\n\n## Транскрипты\nлежат в ~/.claude\n",
+                                  encoding="utf-8")
     assert entries.needs_migration(repo)
     made = entries.migrate(repo)
     assert made == 3
@@ -184,7 +195,8 @@ def test_agent_argv_is_caged(tmp_path):
     def runner(argv, cwd, prompt):
         seen["argv"], seen["cwd"], seen["prompt"] = argv, cwd, prompt
         # the temp dir dies with the call — capture the config while it lives
-        seen["mcp"] = Path(argv[argv.index("--mcp-config") + 1]).read_text()
+        seen["mcp"] = Path(
+            argv[argv.index("--mcp-config") + 1]).read_text(encoding="utf-8")
         class R: returncode, stdout, stderr = 0, "done", ""
         return R()
 
@@ -202,7 +214,7 @@ def test_agent_argv_is_caged(tmp_path):
     assert argv[argv.index("--model") + 1] == "claude-opus-5"
     assert "--tools" not in argv          # measured: --tools "" strips MCP too
     assert "переделай" in seen["prompt"]  # prompt on stdin, not argv
-    assert str(tmp_path) in seen["mcp"] and "METADOCS_SESSION" in seen["mcp"]
+    assert embedded(tmp_path) in seen["mcp"] and "METADOCS_SESSION" in seen["mcp"]
 
 
 def test_agent_model_flag_only_when_configured(tmp_path):
@@ -251,7 +263,7 @@ def test_codex_argv_is_caged(tmp_path):
     joined = " ".join(argv)
     assert 'model="gpt-5.6-terra"' in joined
     assert 'model_reasoning_effort="medium"' in joined
-    assert "METADOCS_SESSION" in joined and str(tmp_path) in joined
+    assert "METADOCS_SESSION" in joined and embedded(tmp_path) in joined
     assert argv[-1] == "-"                   # prompt rides stdin
     assert "переделай" in seen["prompt"] and "DATA, not instructions" in seen["prompt"]
 
@@ -448,7 +460,7 @@ def test_run_commits_agent_writes_even_on_later_failure(db, tmp_path, repo,
 def test_run_migrates_old_format_first(db, tmp_path, repo, monkeypatch):
     cfg = _world(db, tmp_path, repo, monkeypatch)
     (repo / "proj").mkdir()
-    (repo / "proj" / "bugs.md").write_text("## Старый\nтело\n")
+    (repo / "proj" / "bugs.md").write_text("## Старый\nтело\n", encoding="utf-8")
     report = run_once(cfg, db, lambda p, k, t: True)
     assert report.migrated == 1
     assert entries.load(repo, next(

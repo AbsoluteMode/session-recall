@@ -125,7 +125,7 @@ def run(args: argparse.Namespace) -> int:
               f"sessions distilled so far: {len(marks.marks)}")
         log = app_config.DATA_DIR / "metadocs.log"
         if log.exists():
-            tail = log.read_text()[-800:]
+            tail = log.read_text(encoding="utf-8")[-800:]
             print(f"--- log tail ---\n{tail.strip()}")
         return 0
 

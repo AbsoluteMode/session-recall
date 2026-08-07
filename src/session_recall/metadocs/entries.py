@@ -95,17 +95,17 @@ def save(repo: Path, entry: Entry) -> Path:
     entry.updated = _today()
     path = entry_path(repo, entry)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render(entry))
+    path.write_text(render(entry), encoding="utf-8")
     return path
 
 
 def load(repo: Path, entry_id: str) -> Entry | None:
     for path in repo.glob(f"*/*/{entry_id}.md"):
-        got = parse(path.read_text())
+        got = parse(path.read_text(encoding="utf-8"))
         if got and got.id == entry_id:
             return got
     for path in repo.glob(f"{USER_DIR}/{entry_id}.md"):
-        got = parse(path.read_text())
+        got = parse(path.read_text(encoding="utf-8"))
         if got and got.id == entry_id:
             return got
     return None
@@ -136,7 +136,7 @@ def iter_entries(repo: Path, project: str | None = None,
             if path in seen:
                 continue
             seen.add(path)
-            entry = parse(path.read_text())
+            entry = parse(path.read_text(encoding="utf-8"))
             if entry:
                 yield entry
 
@@ -191,7 +191,7 @@ def migrate(repo: Path) -> int:
         if old.name not in _OLD_FILES:
             continue
         project, category = old.parent.name, old.stem
-        for title, body in _sections(old.read_text()):
+        for title, body in _sections(old.read_text(encoding="utf-8")):
             m = _SOURCES_RE.search(body)
             sources = [s.strip() for s in m.group(1).split(",")] if m else []
             body_clean = _SOURCES_RE.sub("", body).strip()
@@ -202,8 +202,8 @@ def migrate(repo: Path) -> int:
         old.unlink()
     user_map = repo / "USER.md"
     if user_map.exists():
-        for title, body in _sections(user_map.read_text()) or [("Карта данных",
-                                                               user_map.read_text())]:
+        raw_user_map = user_map.read_text(encoding="utf-8")
+        for title, body in _sections(raw_user_map) or [("Карта данных", raw_user_map)]:
             m = _SOURCES_RE.search(body)
             sources = [s.strip() for s in m.group(1).split(",")] if m else []
             save(repo, Entry(id=new_id("user"), project="", category="user",
