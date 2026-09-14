@@ -203,7 +203,7 @@ def discover_codex_transcripts(sessions_dir: Path, archived_dir: Path) -> list[T
 
 
 def extractor_version(source: str) -> str:
-    versions = {"claude": "2", "codex": "1", "cursor": "2"}
+    versions = {"claude": "2", "codex": "2", "cursor": "2"}
     try:
         return versions[source]
     except KeyError as exc:
@@ -270,7 +270,36 @@ def _render_claude(obj: dict) -> str:
     return "\n".join(part for part in parts if part)
 
 
+def _completed_message(obj: dict) -> tuple[str, str] | None:
+    """Codex desktop records visible messages as completed typed items.
+
+    Only explicit UserMessage/AgentMessage items are conversation surface;
+    tool output, reasoning and mirrored response_item messages stay excluded.
+    """
+    payload = obj.get("payload")
+    if (obj.get("type") != "event_msg" or not isinstance(payload, dict)
+            or payload.get("type") != "item_completed"):
+        return None
+    item = payload.get("item")
+    if not isinstance(item, dict):
+        return None
+    role = {"UserMessage": "user", "AgentMessage": "assistant"}.get(item.get("type"))
+    if role is None:
+        return None
+    content = item.get("content")
+    if not isinstance(content, list):
+        return None
+    text = "\n".join(block["text"] for block in content
+                     if isinstance(block, dict)
+                     and block.get("type") in {"text", "Text", "input_text", "output_text"}
+                     and isinstance(block.get("text"), str) and block["text"].strip())
+    return role, text
+
+
 def _render_codex(obj: dict) -> str:
+    completed = _completed_message(obj)
+    if completed is not None:
+        return completed[1]
     envelope = obj.get("type")
     payload = obj.get("payload") or {}
     if not isinstance(payload, dict):
@@ -330,6 +359,9 @@ def _render_codex(obj: dict) -> str:
 
 
 def _codex_role_and_type(obj: dict) -> tuple[str, str]:
+    completed = _completed_message(obj)
+    if completed is not None:
+        return completed[0], "item_completed"
     envelope = obj.get("type", "")
     payload = obj.get("payload") or {}
     payload = payload if isinstance(payload, dict) else {}
@@ -482,8 +514,9 @@ def read_transcript(path: str, source: str) -> list[dict[str, Any]]:
         payload = payload if isinstance(payload, dict) else {}
         kind = payload.get("type")
         envelope = obj.get("type")
-        if envelope == "event_msg" and kind in {"user_message", "agent_message"}:
-            role = "user" if kind == "user_message" else "assistant"
+        if envelope == "event_msg" and (kind in {"user_message", "agent_message"}
+                                        or _completed_message(obj) is not None):
+            role = event.role
             content: Any = event.content if role == "user" else [{"type": "text", "text": event.content}]
             turns.append(_claude_shaped(
                 event, surface=bool(event.content), role=role, event_type=role, content=content))
@@ -558,11 +591,11 @@ def extract_codex_file(path: str, project: str = "") -> list[Chunk]:
         if not isinstance(payload, dict):
             continue
         kind = payload.get("type")
-        if event.obj.get("type") == "event_msg" and kind in {
-                "user_message", "agent_message"}:
+        if event.obj.get("type") == "event_msg" and (kind in {
+                "user_message", "agent_message"} or _completed_message(event.obj) is not None):
             if not event.content.strip():
                 continue
-            role = "user" if kind == "user_message" else "assistant"
+            role = event.role
             chunks.append(make_chunk(event, role, event.content))
     return chunks
 

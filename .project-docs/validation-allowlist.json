@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "allow": [
+    {
+      "path": ".github/workflows/test.yml",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/models",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/Sync/sr-share",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/meta-docs",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db)",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/Sync/sr-share",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/meta-docs",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db)",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/Sync/sr-share",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/meta-docs",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db)",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/Sync/sr-share",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/meta-docs",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/index.db)",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/projects/-Users-maxim/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-06-27-recall-ergonomics-when-and-recent-sessions.md",
+      "rule": "personal-path",
+      "literal": "~/sidekey)",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "rule": "personal-path",
+      "literal": "~/.local/bin/session-recall{,-mcp}",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "rule": "personal-path",
+      "literal": "~/.claude/settings.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "rule": "personal-path",
+      "literal": "~/.zshenv",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md",
+      "rule": "personal-path",
+      "literal": "~/.ssh",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-07-31-metadocs-living-project-memory.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/salvage/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/team-hub.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/hub.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "skills/setup/SKILL.md",
+      "rule": "personal-path",
+      "literal": "~/.local/share/session-recall/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "skills/setup/SKILL.md",
+      "rule": "personal-path",
+      "literal": "~/Sync/sr-share",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": ".github/workflows/publish.yml",
+      "rule": "sensitive-assignment",
+      "literal": "token: write",
+      "reason": "Documented example or GitHub Actions permission keyword; this is not a credential value."
+    },
+    {
+      "path": "docs/decisions/2026-08-06-team-hub-central-index.md",
+      "rule": "sensitive-assignment",
+      "literal": "token: \u2026\u00bb.",
+      "reason": "Documented example or GitHub Actions permission keyword; this is not a credential value."
+    },
+    {
+      "path": "skills/setup/SKILL.md",
+      "rule": "sensitive-assignment",
+      "literal": "VOYAGE_API_KEY=\u2026`",
+      "reason": "Documented example using an ellipsis placeholder, not a credential value."
+    }
+  ]
+}

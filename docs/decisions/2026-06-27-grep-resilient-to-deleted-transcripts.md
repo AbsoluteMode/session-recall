@@ -9,7 +9,7 @@ global `grep` (without `session_id`) crashed with
 
 ```
 [Errno 2] No such file or directory:
-/Users/maxim/.claude/projects/-Users-maxim/98688231-0c4e-471d-aec2-a4ee74efda4f.jsonl
+$HOME/.claude/projects/-Users-maxim/98688231-0c4e-471d-aec2-a4ee74efda4f.jsonl
 ```
 
 Hypothesis in the feedback: the path is "broken/truncated" (`-Users-maxim` instead of
@@ -40,7 +40,7 @@ drill-down on such a hit would return nothing).
 Diagnosis disproved the feedback hypothesis. Measurement against the real index:
 
 - `~/.claude/projects/-Users-maxim/` **exists** — it is a valid project dir for
-  sessions launched from home `/Users/maxim` (23 `.jsonl`). The path is not truncated, the encoding
+  sessions launched from home `$HOME` (23 `.jsonl`). The path is not truncated, the encoding
   is correct.
 - Of the **338** indexed `file_path` entries, exactly **one** is missing from disk — that very
   `98688231-…jsonl`. The file was **deleted after indexing**; its chunks remained in the DB and

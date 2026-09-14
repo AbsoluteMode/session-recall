@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "session-recall"
-DB_PATH = DATA_DIR / "index.db"
+DB_PATH = Path(os.environ.get("SESSION_RECALL_DB_PATH") or (DATA_DIR / "index.db")).expanduser()
 SETTINGS_PATH = DATA_DIR / "settings.json"   # written by onboarding, human-editable
 CLAUDE_PROJECTS = Path(
     os.environ.get("SESSION_RECALL_CLAUDE_PROJECTS")
@@ -53,6 +53,9 @@ class EmbedSettings:
 # reranker together, because those four are not independent choices — picking a
 # local model and leaving a cloud reranker configured just fails later, further away.
 PRESETS: dict[str, EmbedSettings] = {
+    "inference-api": EmbedSettings(
+        provider="inference-api", model="embedder", dim=4096, base_url=None,
+        send_dimensions=False, rerank_provider="inference-api", rerank_model="reranker"),
     "voyage": EmbedSettings(
         provider="voyage", model="voyage-4-large", dim=1024, base_url=None,
         send_dimensions=False, rerank_provider="voyage", rerank_model="rerank-2.5"),
@@ -196,4 +199,12 @@ def embed_fingerprint() -> str:
     """Which embedding space vectors live in right now. Read at call time (not
     frozen above) so tests and long processes see configuration changes. The
     format is part of file signatures — change it and every file re-embeds."""
-    return f"{EMBED_PROVIDER}/{EMBED_MODEL}/{EMBED_DIM}"
+    fingerprint = f"{EMBED_PROVIDER}/{EMBED_MODEL}/{EMBED_DIM}"
+    if EMBED_PROVIDER == "inference-api":
+        import hashlib
+        # Public capability aliases stay constant when the backend rotates.
+        identity = (EMBED_BASE_URL or "") + "|" + os.environ.get(
+            "SESSION_RECALL_EMBED_REVISION", "") + "|query-document-v1|" + os.environ.get(
+                "SESSION_RECALL_INFERENCE_MAX_TOKENS", "8192")
+        fingerprint += "/" + hashlib.sha256(identity.encode()).hexdigest()[:16]
+    return fingerprint

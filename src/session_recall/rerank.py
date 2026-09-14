@@ -51,6 +51,9 @@ def make_reranker(provider: str | None = None, model: str | None = None) -> Opti
         return None
     if provider == "voyage":
         return VoyageReranker(model=model)
+    if provider == "inference-api":
+        from .inference import InferenceReranker
+        return InferenceReranker(model=model)
     if provider == "fake":
         return FakeReranker()
     raise ValueError(f"unknown rerank provider: {provider!r} (set SESSION_RECALL_RERANK_PROVIDER)")
