@@ -316,6 +316,10 @@ export SESSION_RECALL_EMBED_MODEL=your-model
 export SESSION_RECALL_EMBED_DIM=1024
 ```
 
+**Hosted Qwen gateway:** use the `inference-api` preset for query-aware embeddings
+and a Cohere-style reranker. See the [gateway setup guide](.project-docs/processes/inference-api-setup.md)
+for credentials, model aliases, context limits, and migration to a separate index.
+
 **A different embedder needs its own index.** Vector tables are fixed-width, so changing
 the model or dimension means rebuilding: delete `~/.local/share/session-recall/index.db`
 and re-run `index`. Session Recall fingerprints the embedding space of every indexed file

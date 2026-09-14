@@ -211,7 +211,37 @@ def test_claude_passthrough_and_version_validation(tmp_path):
     path.write_text(json.dumps(raw) + "\n")
     assert read_transcript(str(path), "claude") == [raw]
     assert extractor_version("claude") == "2"
-    assert extractor_version("codex") == "1"
+    assert extractor_version("codex") == "2"
     assert extractor_version("cursor") == "2"
     with pytest.raises(ValueError, match="unknown transcript source"):
         read_transcript(str(path), "other")
+
+
+def test_desktop_completed_messages_index_once_and_exclude_tools(tmp_path):
+    path = tmp_path / 'desktop.jsonl'
+    rows = [
+        {'type':'session_meta','payload':{'id':'desktop','cwd':'/repo'}},
+        {'type':'event_msg','payload':{'type':'item_completed','item':{
+            'type':'UserMessage','id':'u1','content':[{'type':'text','text':'Find the decision'}],
+        }}},
+        {'type':'response_item','payload':{'type':'message','role':'user',
+            'content':[{'type':'input_text','text':'Find the decision'}]}},
+        {'type':'event_msg','payload':{'type':'item_completed','item':{
+            'type':'AgentMessage','id':'a1','phase':'final',
+            'content':[{'type':'Text','text':'We chose Qwen.'}],
+        }}},
+        {'type':'event_msg','payload':{'type':'item_completed','item':{
+            'type':'CommandExecution','stdout':'tool output must not be embedded',
+        }}},
+        {'type':'event_msg','payload':{'type':'item_completed','item':{
+            'type':'Reasoning','content':[{'type':'Text','text':'private reasoning'}],
+        }}},
+    ]
+    path.write_text(''.join(json.dumps(row)+'\n' for row in rows))
+    chunks=extract_codex_file(str(path))
+    assert [(c.role,c.text) for c in chunks] == [('user','Find the decision'),('assistant','We chose Qwen.')]
+    for chunk in chunks:
+        raw=path.read_bytes()[chunk.byte_offset:chunk.byte_offset+chunk.byte_len]
+        assert json.loads(raw)['payload']['type']=='item_completed'
+    surface=[t for t in read_transcript(str(path),'codex') if t['__surface']]
+    assert [_text(t) for t in surface] == ['Find the decision','We chose Qwen.']

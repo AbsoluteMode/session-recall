@@ -156,6 +156,9 @@ def make_embedder(provider: str | None = None, model: str | None = None,
     provider = (provider or config.EMBED_PROVIDER).lower()
     if provider == "voyage":
         return VoyageEmbedder(model=model)
+    if provider == "inference-api":
+        from .inference import InferenceEmbedder
+        return InferenceEmbedder(model=model, dim=dim)
     if provider in ("openai", "openai-compatible"):
         return OpenAIEmbedder(model=model, dim=dim)
     if provider == "builtin":
