@@ -68,4 +68,4 @@ session-recall остаётся тем, чем был до meta docs: хране
   карточек для пилота little-memory.
 
 ---
-12.10.2026 · ветка `chore/remove-metadocs`
+12.10.2026 · PR [#61](https://github.com/AbsoluteMode/session-recall/pull/61)
