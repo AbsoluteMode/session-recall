@@ -396,3 +396,32 @@ def test_read_only_store_searches_but_never_writes(tmp_path):
         reader.add(chunk, [0.02] * EMBED_DIM)
         reader.commit()
     reader.db.close()
+
+
+def test_rows_of_removed_meta_docs_are_dropped_on_open(tmp_path):
+    """meta docs is gone, but indexes built before that still hold its entries.
+    Nothing would ever re-index or prune them, so they would surface in
+    recall_search forever — the next writable open drops them, and only them."""
+    path = tmp_path / "t.db"
+    s = Store(path)
+    keep = s.add(_chunk_in("u1", "alpha transcript", "/a.jsonl"), [1.0] + [0.0] * 1023)
+    s.mark_indexed("/a.jsonl", "sig-a")
+    entry = Chunk(session_id="act-1", uuid="act-1", role="doc", text="alpha entry",
+                  project="p", cwd="", git_branch="", ts=1,
+                  file_path="/repo/p/actions/act-1.md", byte_offset=0, byte_len=11,
+                  turn_index=0, content_hash="h-entry", source="metadocs")
+    s.add(entry, [0.0, 1.0] + [0.0] * 1022)
+    s.mark_indexed("/repo/p/actions/act-1.md", "metadocs-v1:fp:1:11", source="metadocs")
+    s.close()
+
+    s = Store(path)
+    assert s.db.execute("SELECT count(*) FROM chunks").fetchone()[0] == 1
+    assert s.db.execute("SELECT count(*) FROM vec_chunks").fetchone()[0] == 1
+    assert s.fts("alpha", 5) == [keep]
+    assert s.stored_sig("/repo/p/actions/act-1.md") is None
+    assert s.stored_sig("/a.jsonl") == "sig-a"
+    s.close()
+
+    reopened = Store(path)                            # idempotent: nothing left to drop
+    assert reopened.get_chunk(keep).uuid == "u1"
+    reopened.close()

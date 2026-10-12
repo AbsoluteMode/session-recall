@@ -17,9 +17,9 @@ from pathlib import Path
 
 from ..embed import make_embedder
 from ..index import index_corpus
-from ..metadocs.lock import acquire_lock
 from ..store import Store
 from . import storage
+from .lock import acquire_lock
 
 LOCK_NAME = "hub-index.lock"
 

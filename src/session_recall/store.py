@@ -16,6 +16,10 @@ _COLS = ["session_id", "uuid", "role", "text", "project", "cwd",
          "git_branch", "ts", "file_path", "byte_offset", "byte_len",
          "turn_index", "content_hash", "source"]
 _INT_COLS = {"ts", "byte_offset", "byte_len", "turn_index"}
+# Producers this code no longer has. Their rows would keep surfacing in
+# recall_search with nothing behind them to expand or re-index.
+# WHY: docs/decisions/2026-10-12-remove-metadocs.md
+_RETIRED_SOURCES = ("metadocs",)
 
 
 class Store:
@@ -97,7 +101,25 @@ class Store:
             "CREATE INDEX IF NOT EXISTS idx_chunks_ts ON chunks(ts)")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_source_ts ON chunks(source, ts)")
+        self._drop_retired_sources()
         self.db.commit()
+
+    def _drop_retired_sources(self) -> None:
+        """Runs on every writable open. Once the rows are gone it is read-only
+        probes: concurrent hooks open the index at once and must not queue on
+        a write lock, nor pay the vec0 sweep again."""
+        for source in _RETIRED_SOURCES:
+            if self.db.execute(
+                    "SELECT 1 FROM chunks WHERE source = ? LIMIT 1", (source,)).fetchone():
+                for table in ("vec_chunks", "fts_chunks"):
+                    self.db.execute(
+                        f"DELETE FROM {table} WHERE chunk_id IN "
+                        "(SELECT id FROM chunks WHERE source = ?)", (source,))
+                self.db.execute("DELETE FROM chunks WHERE source = ?", (source,))
+            if self.db.execute(
+                    "SELECT 1 FROM indexed_files WHERE source = ? LIMIT 1",
+                    (source,)).fetchone():
+                self.db.execute("DELETE FROM indexed_files WHERE source = ?", (source,))
 
     def add(self, chunk: Chunk, embedding: "list[float] | bytes") -> int:
         """Insert one chunk. `embedding` is either a fresh vector or an already
@@ -311,7 +333,7 @@ class Store:
     def refresh_embed_meta(self, fingerprint: str) -> bool:
         """Attest the embedding space only when EVERY indexed unit agrees.
 
-        The database is shared by Claude, Codex, Cursor and meta docs.  A
+        The database is shared by Claude, Codex and Cursor.  A
         source-selective refresh must therefore never move the global marker
         merely because the selected source finished cleanly: untouched rows
         may still contain vectors from the previous model.  Signatures for all

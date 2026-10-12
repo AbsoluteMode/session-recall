@@ -480,41 +480,6 @@ session-recall share fetch           # collect the answers
 
 </details>
 
-## Meta docs — la memoria del proyecto, puesta por escrito
-
-El recall en bruto responde a *qué se dijo*. Meta docs responde a lo que los agentes
-preguntan de verdad en mitad de una tarea: *¿este bug ya se arregló antes? ¿cómo realizo
-esta acción? ¿por qué se decidió así?* Un trabajo diario entrega el diálogo de cada sesión —
-mensajes del usuario y respuestas finales, nunca el ruido de las herramientas — a un agente
-destilador que mantiene entradas en Markdown dentro de un repositorio Git que tú eliges:
-
-- `<project>/bugs/` — bugs que de verdad se arreglaron: cómo se reconoció, diagnosticó,
-  arregló y demostró arreglado cada uno;
-- `<project>/actions/` — procedimientos, paso a paso, escritos para que un agente al que se
-  le pregunte de nuevo pueda seguir la entrada por sí solo;
-- `<project>/decisions/` — decisiones disputadas: qué se decidió, por qué así, qué se
-  rechazó;
-- `USER/` — un mapa global de dónde vive tu información y *cómo encontrarla* (comandos de
-  consulta y ubicaciones de almacenamiento — nunca los valores almacenados en sí).
-
-```bash
-session-recall metadocs init ~/meta-docs --from-today   # memory starts now
-session-recall metadocs run                             # one pass now
-session-recall metadocs enable   # daily job: launchd (macOS) / systemd user timer (Linux)
-session-recall metadocs status
-session-recall metadocs index-history --days 30         # opt-in: distill the past, once
-```
-
-Todo el mundo del destilador son cuatro verbos MCP — `search / create / edit / delete` — y
-las reglas que soportan la carga son mecánica del servidor, no peticiones en el prompt:
-`create` se rechaza hasta que el agente haya hecho `search` (la deduplicación es
-obligatoria), las entradas se escanean en busca de secretos antes de que un solo byte llegue
-al disco, y `delete` exige un motivo. Las ejecuciones son incrementales y cada proyecto con
-cambios recibe su propio commit local — revisar es un diff, deshacer es un revert, y
-compartir la memoria con un equipo es simplemente subir el repo a algún lugar privado. Nada
-se sube a menos que actives `--push`; el motor y el modelo salen solo de la configuración
-(`init --engine claude-cli|codex --model …`) — nada se elige en silencio.
-
 ## La privacidad es una invariante estricta
 
 Este es un repositorio público. **En él solo entra código.** Los datos de ejecución viven
@@ -587,7 +552,6 @@ Empieza por:
 - [Cursor como origen en bruto duradero](docs/decisions/2026-08-03-cursor-durable-raw-source.md)
 - [Recall acotado por proyecto](docs/decisions/2026-06-26-recall-project-scope.md)
 - [Puerta de seguridad de la compartición P2P](docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md)
-- [Meta docs, memoria viva del proyecto](docs/decisions/2026-07-31-metadocs-living-project-memory.md)
 
 ## Hoja de ruta
 

@@ -456,39 +456,6 @@ session-recall share fetch           # collect the answers
 
 </details>
 
-## Meta docs — the project's memory, written down
-
-Raw recall answers *what was said*. Meta docs answers what agents actually ask mid-task:
-*was this bug fixed before? how do I perform this action? why was it decided this way?* A
-daily job hands each session's dialogue — user messages and final answers, never the tool
-noise — to a distiller agent that maintains Markdown entries in a Git repository you choose:
-
-- `<project>/bugs/` — bugs that were actually fixed: how each was recognized, diagnosed,
-  fixed, and proven fixed;
-- `<project>/actions/` — procedures, step by step, written so an agent asked again can
-  follow the entry alone;
-- `<project>/decisions/` — contested choices: what was decided, why that way, what was
-  rejected;
-- `USER/` — a global map of where your information lives and *how to find it* (lookup
-  commands and storage locations — never the stored values themselves).
-
-```bash
-session-recall metadocs init ~/meta-docs --from-today   # memory starts now
-session-recall metadocs run                             # one pass now
-session-recall metadocs enable   # daily job: launchd (macOS) / systemd user timer (Linux)
-session-recall metadocs status
-session-recall metadocs index-history --days 30         # opt-in: distill the past, once
-```
-
-The distiller's whole world is four MCP verbs — `search / create / edit / delete` — and the
-load-bearing rules are server mechanics, not prompt requests: `create` is refused until the
-agent has `search`ed (dedup is mandatory), entries are scanned for secrets before a byte
-reaches disk, and `delete` demands a reason. Runs are incremental, and each changed project
-gets its own local commit — review is a diff, undo is a revert, and sharing the memory with
-a team is just pushing the repo somewhere private. Nothing is pushed unless you opt into
-`--push`; the engine and model come from config only
-(`init --engine claude-cli|codex --model …`) — nothing is picked silently.
-
 ## Privacy is a hard invariant
 
 This is a public repository. **Only code goes in it.** Runtime data lives under
@@ -558,7 +525,6 @@ Engineering rationale and invariants live in [`docs/decisions/`](docs/decisions/
 - [Cursor as a durable raw source](docs/decisions/2026-08-03-cursor-durable-raw-source.md)
 - [Project-scoped recall](docs/decisions/2026-06-26-recall-project-scope.md)
 - [P2P sharing security gate](docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md)
-- [Meta docs living project memory](docs/decisions/2026-07-31-metadocs-living-project-memory.md)
 
 ## Roadmap
 
