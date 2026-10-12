@@ -280,7 +280,7 @@ def test_clean_pass_records_the_embed_space(tmp_path):
 
 
 def test_source_selective_pass_cannot_attest_a_mixed_index(tmp_path):
-    """A clean Claude pass says nothing about untouched Cursor/meta-doc rows.
+    """A clean Claude pass says nothing about untouched Cursor rows.
     The global marker may move only when every producer signature agrees."""
     from session_recall import config
     projects = _corpus(tmp_path)

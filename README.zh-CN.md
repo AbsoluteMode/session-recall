@@ -434,37 +434,6 @@ session-recall share fetch           # collect the answers
 
 </details>
 
-## Meta docs——写下来的项目记忆
-
-原始召回回答的是*当时说了什么*。Meta docs 回答的是智能体在任务中途真正会问的问题：
-*这个 bug 以前修过吗？这个操作怎么做？当初为什么这么定？* 一个每日任务会把每个会话的
-对话内容——用户消息和最终回答，绝不含工具噪音——交给一个蒸馏智能体，由它在你指定的
-Git 仓库里维护 Markdown 条目：
-
-- `<project>/bugs/`——确实修复过的 bug：每个 bug 如何被识别、诊断、修复，
-  以及如何证明已修复；
-- `<project>/actions/`——按步骤写下的操作流程，再次被问到的智能体只凭条目本身
-  就能照做；
-- `<project>/decisions/`——有过争议的选择：定了什么、为何这样定、否掉了什么；
-- `USER/`——一张全局地图，记录你的信息存放在哪里以及*如何找到它*（查询命令与
-  存储位置——绝不记录存储的值本身）。
-
-```bash
-session-recall metadocs init ~/meta-docs --from-today   # memory starts now
-session-recall metadocs run                             # one pass now
-session-recall metadocs enable   # daily job: launchd (macOS) / systemd user timer (Linux)
-session-recall metadocs status
-session-recall metadocs index-history --days 30         # opt-in: distill the past, once
-```
-
-蒸馏器的全部世界只有四个 MCP 动词——`search / create / edit / delete`——而那些承重的
-规则是服务器机制，不是提示词请求：智能体没先 `search` 就调用 `create` 会被拒绝
-（去重是强制的），条目在任何字节落盘之前都会先做机密扫描，`delete` 必须给出理由。
-运行是增量式的，每个有变更的项目都会得到自己的本地提交——审阅就是看 diff，撤销就是
-revert，与团队共享这份记忆只需把仓库推到某个私有位置。除非你主动选择 `--push`，
-否则什么都不会被推送；引擎和模型只来自配置（`init --engine claude-cli|codex --model …`）——
-没有任何东西被悄悄选定。
-
 ## 隐私是硬性不变量
 
 这是一个公开仓库，**里面只有代码**。运行时数据位于 `~/.local/share/session-recall/`，
@@ -532,7 +501,6 @@ claude mcp add session-recall --scope user -- /absolute/path/.venv/bin/session-r
 - [Cursor 作为持久的原始数据源](docs/decisions/2026-08-03-cursor-durable-raw-source.md)
 - [按项目范围的召回](docs/decisions/2026-06-26-recall-project-scope.md)
 - [P2P 分享的安全门禁](docs/decisions/2026-07-30-p2p-sharing-v1-security-gate.md)
-- [Meta docs——活的项目记忆](docs/decisions/2026-07-31-metadocs-living-project-memory.md)
 
 ## 路线图
 

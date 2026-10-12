@@ -1,7 +1,7 @@
 {
   "name": "session-recall",
   "displayName": "Session Recall",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "minClientVersions": {
     "cursor": "2.5.0"
   },

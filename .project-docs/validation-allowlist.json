@@ -34,12 +34,6 @@
     {
       "path": "README.es-ES.md",
       "rule": "personal-path",
-      "literal": "~/meta-docs",
-      "reason": "Documented example of a standard runtime path, with no personal username or credential."
-    },
-    {
-      "path": "README.es-ES.md",
-      "rule": "personal-path",
       "literal": "~/.local/share/session-recall/",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
@@ -76,12 +70,6 @@
     {
       "path": "README.md",
       "rule": "personal-path",
-      "literal": "~/meta-docs",
-      "reason": "Documented example of a standard runtime path, with no personal username or credential."
-    },
-    {
-      "path": "README.md",
-      "rule": "personal-path",
       "literal": "~/.local/share/session-recall/",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
@@ -118,12 +106,6 @@
     {
       "path": "README.zh-CN.md",
       "rule": "personal-path",
-      "literal": "~/meta-docs",
-      "reason": "Documented example of a standard runtime path, with no personal username or credential."
-    },
-    {
-      "path": "README.zh-CN.md",
-      "rule": "personal-path",
       "literal": "~/.local/share/session-recall/",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
@@ -155,12 +137,6 @@
       "path": "docs/README.ru.md",
       "rule": "personal-path",
       "literal": "~/Sync/sr-share",
-      "reason": "Documented example of a standard runtime path, with no personal username or credential."
-    },
-    {
-      "path": "docs/README.ru.md",
-      "rule": "personal-path",
-      "literal": "~/meta-docs",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
     {

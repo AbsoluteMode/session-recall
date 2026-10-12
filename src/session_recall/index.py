@@ -184,8 +184,8 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
         print(f"session-recall: {len(failed)} file(s) failed to index (will retry "
               f"next run):\n  " + "\n  ".join(failed[:10]), file=sys.stderr)
     # This is a GLOBAL attestation, not a verdict about only the sources this
-    # call selected.  Cursor and meta docs share the same vector table and may
-    # be refreshed by a later stage (or not selected at all), so derive the
+    # call selected.  Cursor shares the same vector table and may be
+    # refreshed by a later stage (or not selected at all), so derive the
     # marker from every indexed_files signature.  A failed/partial pass remains
     # explicitly mixed and semantic search stays off until all producers heal.
     store.refresh_embed_meta(_embed_fp())

@@ -26,8 +26,7 @@ def _date_range(args, parser: argparse.ArgumentParser) -> tuple[int | None, int 
         parser.error(str(exc))
 
 
-_SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor",
-                  "metadocs": "meta docs"}
+_SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
 _ZONE_MARKS = {"GREEN": "ok  ", "AMBER": "warn", "RED": "FAIL"}
 
 
@@ -119,8 +118,6 @@ def main(argv=None):
     sub.add_parser("sync")
     from .share import cli as share_cli
     share_cli.add_parser(sub)
-    from .metadocs import cli as metadocs_cli
-    metadocs_cli.add_parser(sub)
     from .hub import cli as hub_cli
     hub_cli.add_parser(sub)
     from . import onboarding
@@ -146,8 +143,6 @@ def main(argv=None):
         print(f"pushed {stats['files']} transcript(s), "
               f"{stats['uploaded_bytes']} B, {stats['redacted']} secret(s) redacted")
         return 1 if stats["failed"] else 0
-    if args.cmd == "metadocs":  # reads the index read-only via plain sqlite3
-        return metadocs_cli.run(args)
     if args.cmd == "setup":  # indexes via a child process (fresh env resolve)
         return onboarding.run(args)
 
@@ -183,16 +178,6 @@ def main(argv=None):
             else:
                 if c:
                     print(f"indexed {c} cursor session(s)")
-        # meta docs entries ride the same index (source="metadocs") whenever
-        # the feature is configured; the SessionStart hook keeps them fresh
-        if args.source == "all":
-            from .metadocs import config as md_config
-            md_cfg = md_config.load()
-            if md_cfg is not None:
-                from .metadocs.indexing import index_metadocs
-                m = index_metadocs(store, embedder, Path(md_cfg.repo).expanduser())
-                if m:
-                    print(f"indexed {m} meta docs entr(y/ies)")
         _print_corpus_summary(store)
     elif args.cmd == "search":
         recall = Recall(store, make_embedder(), make_reranker())

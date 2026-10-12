@@ -467,39 +467,6 @@ session-recall share fetch           # collect the answers
 
 </details>
 
-## Meta docs — память проекта, записанная текстом
-
-Сырой recall отвечает, *что говорилось*. Meta docs отвечает на то, что агенты реально
-спрашивают посреди задачи: *этот баг уже чинили? как выполнить это действие? почему решили
-именно так?* Ежедневная джоба отдаёт диалог каждой сессии — сообщения пользователя и
-финальные ответы, никогда шум инструментов — агенту-дистиллятору, который ведёт
-Markdown-записи в выбранном Git-репозитории:
-
-- `<project>/bugs/` — реально починенные баги: как баг распознали, как диагностировали, чем
-  чинили и как доказали, что починено;
-- `<project>/actions/` — процедуры, шаг за шагом, написанные так, чтобы агент, которого
-  попросили снова, справился по одной записи;
-- `<project>/decisions/` — спорные выборы: что решили, почему именно так и что отвергли;
-- `USER/` — глобальная карта: где живёт ваша информация и *как её найти* (команды поиска и
-  места хранения — никогда сами значения).
-
-```bash
-session-recall metadocs init ~/meta-docs --from-today   # memory starts now
-session-recall metadocs run                             # one pass now
-session-recall metadocs enable   # daily job: launchd (macOS) / systemd user timer (Linux)
-session-recall metadocs status
-session-recall metadocs index-history --days 30         # opt-in: distill the past, once
-```
-
-Весь мир дистиллятора — четыре MCP-глагола: `search / create / edit / delete`, а несущие
-правила — это механика сервера, а не просьбы в промпте: `create` отклоняется, пока агент не
-сделал `search` (дедупликация обязательна), записи сканируются на секреты до того, как хоть
-байт коснётся диска, а `delete` требует причину. Прогоны инкрементальные, и каждый
-изменённый проект получает свой локальный коммит — ревью это дифф, откат это revert, а
-поделиться памятью с командой — значит просто запушить репо в приватное место. Ничего не
-пушится без явного `--push`; движок и модель берутся только из конфига
-(`init --engine claude-cli|codex --model …`) — ничего не выбирается втихую.
-
 ## Приватность — жёсткий инвариант
 
 Это публичный репозиторий. **В него попадает только код.** Рантайм-данные живут в
@@ -570,7 +537,6 @@ claude mcp add session-recall --scope user -- /absolute/path/.venv/bin/session-r
 - [Cursor как долговечный сырой источник](decisions/2026-08-03-cursor-durable-raw-source.md)
 - [Recall со скоупом проекта](decisions/2026-06-26-recall-project-scope.md)
 - [Security gate для P2P-шаринга](decisions/2026-07-30-p2p-sharing-v1-security-gate.md)
-- [Meta docs — живая память проекта](decisions/2026-07-31-metadocs-living-project-memory.md)
 
 ## Роадмап
 
