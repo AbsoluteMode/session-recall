@@ -98,6 +98,18 @@ Ranked anchors carry provenance and a human-readable timestamp. `grep` scans **a
 transcripts on demand — including under-the-hood turns (tool output, thinking) that never
 became search chunks. On-demand only: no proactive context injection into every prompt.
 
+**Which project a session belongs to.** A hit's `project` is the folder the session was
+launched in; its `repos` are what that session actually worked on. Every path its tool calls
+name (an edit, a `cd`, a Codex `workdir`) is resolved to the owning git repo — worktrees and
+symlinked aliases collapse to one checkout — and a repo other than the launch folder needs at
+least three calls to count. Pass `project="harmonia"` to any discovery tool to get the
+sessions that worked on that repo wherever they ran; `scope_cwd` includes them too.
+`recall_search` keeps at most two hits per session (`per_session`, `0` = off) so one long
+session cannot fill the page, and cuts each snippet around the passage that matches the
+query. `recent_sessions` reads like a status board: the first real ask, the latest ask and
+answer, branch, repos, `started_by` (`user`, `agent` or `automation`, inferred from
+transcript metadata) and `active` (a turn in the last 10 minutes).
+
 <details>
 <summary><strong>See a complete call</strong></summary>
 

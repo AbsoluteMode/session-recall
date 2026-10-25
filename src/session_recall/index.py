@@ -6,6 +6,7 @@ from .extract import extract_file, extractor_tag
 from .store import Store
 from .embed import Embedder
 from .scope import project_label
+from .repos import REPO_SCAN_VERSION, RepoResolver, attributed_repos, scan_file
 from .transcripts import codex_file_header
 
 def _embed_fp() -> str:
@@ -61,6 +62,24 @@ def _codex_files(codex_dirs: Iterable[Path]):
             yield jsonl, "codex", ""
 
 
+def _scan_sessions(store: Store, path: str, source: str, sig: str,
+                   resolver: RepoResolver) -> None:
+    """Record which repos each session in `path` worked on, and who opened it.
+
+    Text-only (no embedding), so it also runs for files whose chunks are
+    already current: an index built before attribution existed is backfilled
+    by one streaming pass instead of a re-embed. Not committed here."""
+    facts = scan_file(path, source, resolver)
+    store.replace_session_facts(
+        path, source,
+        {sid: (attributed_repos(f, resolver), f.started_by) for sid, f in facts.items()},
+        _scan_sig(sig))
+
+
+def _scan_sig(sig: str) -> str:
+    return f"r{REPO_SCAN_VERSION}:{sig}"
+
+
 def _forget_file(store: Store, path: str):
     """Remove a file that is now recognized as an under-the-hood sidechain."""
     store.delete_file(path)
@@ -89,7 +108,8 @@ def _roots_safe_to_prune(store: Store, roots: Iterable[Path], source: str) -> bo
 
 
 def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
-                 codex_dirs: Iterable[Path] | None = None) -> int:
+                 codex_dirs: Iterable[Path] | None = None,
+                 resolver: RepoResolver | None = None) -> int:
     """Incrementally index Claude Code plus optional Codex transcript roots.
 
     The fourth argument is optional to preserve the original Claude-only Python
@@ -124,6 +144,7 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
     failed_sources: set[str] = set()
     jobs = list(_claude_files(projects_dir) or ())
     jobs.extend(_codex_files(codex_roots))
+    resolver = resolver or RepoResolver()
     for jsonl, source, project in jobs:
         # One transaction per file: delete + re-add + marker commit together.
         # _file_sig and header reads stay INSIDE this isolation for delete races,
@@ -137,6 +158,9 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
                 project = project_label(meta.cwd) or "codex"
             sig = _file_sig(jsonl, source)
             if store.is_indexed(str(jsonl), sig):
+                if store.repo_scan_sig(str(jsonl)) != _scan_sig(sig):
+                    _scan_sessions(store, str(jsonl), source, sig, resolver)
+                    store.commit()
                 continue
             # Reuse only vectors produced by the same source extractor version
             # and embedding space. This makes live append-only updates cheap.
@@ -169,6 +193,7 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
                     reused = cached.get(chunk.content_hash)
                     store.add(chunk, reused if reused is not None else fresh[chunk.content_hash])
             store.mark_indexed(str(jsonl), sig, source=source)
+            _scan_sessions(store, str(jsonl), source, sig, resolver)
             store.commit()
             new_count += len(chunks)
         except Exception as e:

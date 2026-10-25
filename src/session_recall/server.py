@@ -23,6 +23,8 @@ def _adict(a) -> dict:
     # ten times learns nothing, and the hub keeps the field meaningful.
     if d.get("owner") is None:
         d.pop("owner", None)
+    if d.get("repos") is None:
+        d.pop("repos", None)
     return d
 
 
@@ -58,7 +60,8 @@ def _r() -> Recall:
 def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
                   source: str | None = None, start_date: str | None = None,
                   end_date: str | None = None, timezone: str | None = None,
-                  on_date: str | None = None) -> dict:
+                  on_date: str | None = None, project: str | None = None,
+                  per_session: int = 2) -> dict:
     """Semantically search past Claude Code, Codex and Cursor sessions.
 
     Returns {"anchors": [...ranked anchors...], "degraded": null | str}.
@@ -69,9 +72,19 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     Retry with the exact identifiers you expect (error strings, symbols, file names),
     tell the user the search is degraded, and treat a miss as inconclusive.
 
+    Each anchor: project = the folder the session was launched in; repos = the
+    repos that session actually worked on (from its tool calls), most-touched
+    first — use repos to say which project a hit belongs to.
+
     scope_cwd: pass your current working directory to restrict results to the
-    current project/repo (worktrees collapse to the repo root). Omit it for a
+    current project/repo (worktrees collapse to the repo root; sessions that
+    worked on the repo from another folder are included). Omit it for a
     global, cross-project search.
+    project: a repo/project name (e.g. "harmonia"). Matches sessions that
+    actually worked on that repo — by their tool calls, wherever they were
+    launched — plus sessions launched in a folder of that name.
+    per_session: at most this many hits per session before other sessions get
+    the slots (back-filled when history is narrow); 0 = no cap.
     source: optionally restrict to "claude", "codex", or "cursor"; omit for the
     shared index.
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD). Either may
@@ -83,7 +96,8 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
         start_date, end_date, timezone, on_date=on_date)
     hits = _r().recall_search(
         query, k=k, scope_cwd=scope_cwd, source=source,
-        start_ts=start_ts, end_ts=end_ts)
+        start_ts=start_ts, end_ts=end_ts, project=project,
+        per_session=per_session)
     return {"anchors": [_adict(a) for a in hits],
             "degraded": getattr(hits, "degraded", None)}
 
@@ -108,11 +122,15 @@ def step(session_id: str, uuid: str, direction: str, count: int = 1,
 def grep(pattern: str, session_id: str | None = None, scope_cwd: str | None = None,
          source: str | None = None, limit: int = 100,
          start_date: str | None = None, end_date: str | None = None,
-         timezone: str | None = None, on_date: str | None = None) -> list[dict]:
+         timezone: str | None = None, on_date: str | None = None,
+         project: str | None = None) -> list[dict]:
     """On-demand substring scan over raw session transcripts.
 
     scope_cwd: pass your current working directory to restrict the scan to the
     current project/repo; omit for a global scan.
+    project: a repo/project name (e.g. "harmonia"). Matches sessions that
+    actually worked on that repo — by their tool calls, wherever they were
+    launched — plus sessions launched in a folder of that name.
     source: optionally restrict to "claude", "codex", or "cursor".
     limit: maximum number of matches returned (default 100).
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
@@ -123,7 +141,7 @@ def grep(pattern: str, session_id: str | None = None, scope_cwd: str | None = No
         start_date, end_date, timezone, on_date=on_date)
     return [_adict(a) for a in _r().grep(
         pattern, session_id, scope_cwd=scope_cwd, source=source, limit=limit,
-        start_ts=start_ts, end_ts=end_ts)]
+        start_ts=start_ts, end_ts=end_ts, project=project)]
 
 
 @mcp.tool()
@@ -131,26 +149,36 @@ def recent_sessions(scope_cwd: str | None = None, limit: int = 10,
                     source: str | None = None, start_date: str | None = None,
                     end_date: str | None = None,
                     timezone: str | None = None,
-                    on_date: str | None = None) -> list[dict]:
-    """List the most recently active past sessions, freshest first — use to see the
-    current state of work and how fresh the index is (the top entry's
-    last_activity_human is the effective freshness). Also surfaces the sessions of a
-    thread split across resume-created session_ids so you can reassemble the arc.
+                    on_date: str | None = None,
+                    project: str | None = None) -> list[dict]:
+    """List the most recently active past sessions, freshest first — use to see
+    who is working on what right now, the current state of work, and how fresh
+    the index is (the top entry's last_activity_human is the effective
+    freshness). Also surfaces the sessions of a thread split across
+    resume-created session_ids so you can reassemble the arc.
 
     scope_cwd: pass your current working directory to restrict to the current
     project/repo (worktrees collapse to the repo root); omit for all projects.
+    project: a repo/project name (e.g. "harmonia"). Matches sessions that
+    actually worked on that repo — by their tool calls, wherever they were
+    launched — plus sessions launched in a folder of that name.
     source: optionally restrict to "claude", "codex", or "cursor".
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
     on_date: shorthand for one local calendar day; cannot be combined with a range.
     timezone: IANA timezone override; omit it to use the user's computer timezone.
-    Each entry: source, session_id, project, turns, last_activity (epoch),
-    last_activity_human, label (the session's first user prompt).
+    Each entry: source (the agent: claude/codex/cursor), session_id, project
+    (launch folder), repos ([{repo, path, touches}] actually worked on, most
+    first), git_branch, started_by ("user" | "agent" — another session or a
+    program opened it | "automation" — a scheduled heartbeat; inferred from
+    transcript metadata), turns, last_activity (epoch), last_activity_human,
+    active (a turn in the last 10 minutes), label (the first real ask),
+    last_user (the latest ask), last_assistant (the latest answer).
     """
     start_ts, end_ts = date_range_to_epoch(
         start_date, end_date, timezone, on_date=on_date)
     return _r().recent_sessions(
         scope_cwd=scope_cwd, limit=limit, source=source,
-        start_ts=start_ts, end_ts=end_ts)
+        start_ts=start_ts, end_ts=end_ts, project=project)
 
 
 def main():

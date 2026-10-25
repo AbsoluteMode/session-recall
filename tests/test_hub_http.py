@@ -162,6 +162,18 @@ def test_search_returns_ranked_anchors(server, hub):
     assert body["degraded"] is None
 
 
+def test_search_forwards_project_and_per_session(server, hub, monkeypatch):
+    # The handler thread holds its own Recall, so record at the class.
+    seen = []
+    original = FakeRecall.recall_search
+    monkeypatch.setattr(FakeRecall, "recall_search",
+                        lambda self, q, **kw: seen.append(kw) or original(self, q, **kw))
+    key = hub.keys.issue("egor")
+    post(server, "/v1/search",
+         {"query": "q", "project": "harmonia", "per_session": 0}, key=key)
+    assert seen[-1]["project"] == "harmonia" and seen[-1]["per_session"] == 0
+
+
 def test_search_without_a_query_is_a_bad_request(server, hub):
     with pytest.raises(urllib.error.HTTPError) as raised:
         post(server, "/v1/search", {"k": 3}, key=hub.keys.issue("egor"))

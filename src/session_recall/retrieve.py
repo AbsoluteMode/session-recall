@@ -8,6 +8,7 @@ from .embed import Embedder
 from .rerank import Reranker
 from .models import Anchor, Turn
 from .scope import repo_root, in_scope, project_label
+from .snippets import human_ask, query_snippet
 from .timefmt import humanize_ts
 from .transcripts import (
     TranscriptEvent,
@@ -18,6 +19,37 @@ from .transcripts import (
 
 def _snippet(text: str, n: int = 200) -> str:
     return text[:n] + ("…" if len(text) > n else "")
+
+
+# A session is a unit of work: ten hits from one session read as one answer
+# repeated. Past this many per session, other sessions get the slots first.
+PER_SESSION = 2
+# "Active" in recent_sessions: some turn landed within this window.
+ACTIVE_WINDOW_S = 600
+
+
+def diversify(items: list, k: int, per_session: int, key) -> list:
+    """Top-k in rank order with at most `per_session` items per session.
+
+    Overflow is not thrown away: when there are fewer distinct sessions than
+    slots, the remaining slots are back-filled in rank order, so a narrow
+    history still returns k hits. per_session <= 0 disables the cap."""
+    if per_session <= 0:
+        return items[:k]
+    picked: list[int] = []
+    overflow: list[int] = []
+    counts: dict = {}
+    for i, item in enumerate(items):
+        if len(picked) == k:
+            break
+        sid = key(item)
+        if counts.get(sid, 0) < per_session:
+            counts[sid] = counts.get(sid, 0) + 1
+            picked.append(i)
+        else:
+            overflow.append(i)
+    picked += overflow[:k - len(picked)]
+    return [items[i] for i in sorted(picked)]
 
 
 def _match_snippet(text: str, pattern: str, n: int = 240) -> str:
@@ -56,16 +88,29 @@ class Recall:
                 f"source must be 'claude', 'codex', 'cursor', or omitted; got {source!r}")
 
     @staticmethod
-    def _anchor(c, score: "float | None") -> Anchor:
+    def _anchor(c, score: "float | None", query: str = "") -> Anchor:
         return Anchor(session_id=c.session_id, uuid=c.uuid, role=c.role,
-                      snippet=_snippet(c.text), score=score, project=c.project,
-                      when=c.ts, source=c.source)
+                      snippet=query_snippet(c.text, query), score=score,
+                      project=c.project, when=c.ts, source=c.source)
+
+    def _with_repos(self, anchors: list[Anchor]) -> list[Anchor]:
+        """Attach each hit's session attribution (labels, most-touched first)."""
+        keys = {(a.source, a.session_id) for a in anchors
+                if a.source in ("claude", "codex")}
+        repos = self.store.session_repos(keys) if keys else {}
+        for a in anchors:
+            found = repos.get((a.source, a.session_id))
+            if found is not None:
+                a.repos = [r["repo"] for r in found]
+        return anchors
 
     def recall_search(self, query: str, k: int = 10, candidates: int = 100,
                       scope_cwd: str | None = None,
                       source: str | None = None,
                       start_ts: int | None = None,
-                      end_ts: int | None = None) -> list[Anchor]:
+                      end_ts: int | None = None,
+                      project: str | None = None,
+                      per_session: int = PER_SESSION) -> list[Anchor]:
         self._validate_source(source)
         # scope_cwd is the agent's raw cwd; normalize to a repo root so the main
         # checkout and every worktree under it collapse to one scope. None = global.
@@ -93,7 +138,7 @@ class Recall:
                 qv = self.embedder.embed_query(query)
                 for cid, d in self.store.knn(
                         qv, candidates, scope_root=root, source=source,
-                        start_ts=start_ts, end_ts=end_ts):
+                        start_ts=start_ts, end_ts=end_ts, project=project):
                     order.append(cid)
                     dist[cid] = d
             except Exception as exc:
@@ -106,7 +151,7 @@ class Recall:
                             f"only literal word matches are returned ({type(exc).__name__}: {exc})")
         for cid in self.store.fts(
                 query, candidates, scope_root=root, source=source,
-                start_ts=start_ts, end_ts=end_ts):
+                start_ts=start_ts, end_ts=end_ts, project=project):
             if cid not in dist:
                 order.append(cid)
                 dist[cid] = None  # keyword match, no vector distance
@@ -131,27 +176,35 @@ class Recall:
         # Rerank if a reranker is configured AND reachable. The reranker is OPTIONAL (some
         # embedding providers ship none) and may be down — either way we fall back to the
         # KNN/FTS candidate order so recall never hard-fails.
+        # The reranker orders ALL candidates (it scores every document either
+        # way): the per-session cap below needs the full order to back-fill.
         ranked: list[tuple[int, float]] | None = None
         if self.reranker is not None:
             try:
                 ranked = self.reranker.rerank(
-                    query, [chunk_by_id[cid].text for cid in distinct], top_k=k)
+                    query, [chunk_by_id[cid].text for cid in distinct],
+                    top_k=len(distinct))
             except Exception:
                 ranked = None
 
         if ranked is not None:
-            return SearchResult(
-                [self._anchor(chunk_by_id[distinct[idx]], score) for idx, score in ranked],
-                degraded)
-        # no reranker: KNN-similarity order; score monotonic in similarity, metric-
-        # agnostic. Keyword-only hits carry None (no distance), not a fake 0.0 that
-        # reads as "irrelevant" at the tool boundary.
-        out: list[Anchor] = []
-        for cid in distinct[:k]:
-            d = dist.get(cid)
-            score = round(1.0 / (1.0 + d), 4) if isinstance(d, (int, float)) else None
-            out.append(self._anchor(chunk_by_id[cid], score))
-        return SearchResult(out, degraded)
+            scored = [(distinct[idx], score) for idx, score in ranked]
+        else:
+            # no reranker: KNN-similarity order; score monotonic in similarity,
+            # metric-agnostic. Keyword-only hits carry None (no distance), not a
+            # fake 0.0 that reads as "irrelevant" at the tool boundary.
+            scored = []
+            for cid in distinct:
+                d = dist.get(cid)
+                scored.append((cid, round(1.0 / (1.0 + d), 4)
+                               if isinstance(d, (int, float)) else None))
+        picked = diversify(scored, k, per_session,
+                           key=lambda item: (chunk_by_id[item[0]].source,
+                                             chunk_by_id[item[0]].session_id))
+        return SearchResult(
+            self._with_repos([self._anchor(chunk_by_id[cid], score, query)
+                              for cid, score in picked]),
+            degraded)
 
     def _files_for(self, uuid: str, session_id: str | None,
                    source: str | None = None) -> list[str]:
@@ -297,20 +350,26 @@ class Recall:
              scope_cwd: str | None = None,
              source: str | None = None, limit: int = 100,
              start_ts: int | None = None,
-             end_ts: int | None = None) -> list[Anchor]:
+             end_ts: int | None = None,
+             project: str | None = None) -> list[Anchor]:
         self._validate_source(source)
         if limit < 1:
             return []
         root = repo_root(scope_cwd) if scope_cwd else None
+        # Sessions that worked on the scoped repo / named project from
+        # elsewhere: they pass the filter whatever their cwd says.
+        touched_root = self.store.sessions_touching(root=root) if root else set()
+        touched_project = (self.store.sessions_touching(repo=project)
+                           if project else set())
         # Per-path chunk metadata. A file can carry SEVERAL (sid, cwd) pairs —
         # resumed sessions mix sessionIds in one transcript — so this is only a
         # fast-path skip (skip a file when NO row could match) and a fallback for
         # turns lacking their own fields; the authoritative filter is per turn.
         meta: dict[str, list[tuple[str, str, str, str]]] = {}
-        for sid, path, project, cwd, chunk_source in self.store.db.execute(
+        for sid, path, chunk_project, cwd, chunk_source in self.store.db.execute(
                 "SELECT DISTINCT session_id, file_path, project, cwd, source FROM chunks"
                 ).fetchall():
-            meta.setdefault(path, []).append((sid, project, cwd, chunk_source))
+            meta.setdefault(path, []).append((sid, chunk_project, cwd, chunk_source))
         # Scan ALL indexed transcripts, not just chunk-bearing ones: a file whose
         # every turn was filtered at extract (harness boilerplate, tool-only) is
         # exactly the under-the-hood content grep exists for.
@@ -345,16 +404,22 @@ class Recall:
                     if session_id and t_sid != session_id:
                         continue
                     t_cwd = event.cwd or (rows[0][2] if rows else "")
-                    if root:
+                    t_key = (event.source, t_sid)
+                    if root and t_key not in touched_root:
                         if t_cwd:
                             if not in_scope(t_cwd, root):
                                 continue
                         else:
                             continue  # no cwd evidence -> not provably in scope
+                    label = None
+                    if project and t_key not in touched_project:
+                        label = self._grep_label(t_cwd, rows)
+                        if label.lower() != project.lower():
+                            continue
                     blob = json.dumps(sanitize_raw(event.obj), ensure_ascii=False)
                     if pattern in blob:
-                        project = (project_label(t_cwd) if t_cwd
-                                   else (rows[0][1] if rows else ""))
+                        if label is None:
+                            label = self._grep_label(t_cwd, rows)
                         self._anchor_files[(event.source, t_sid, event.uuid)] = path
                         hits.append(Anchor(
                             session_id=t_sid,
@@ -362,21 +427,26 @@ class Recall:
                             role=event.role or event.type,
                             snippet=_match_snippet(blob, pattern),
                             score=1.0,
-                            project=project,
+                            project=label,
                             when=event.ts,
                             source=event.source,
                         ))
                         if len(hits) >= limit:
-                            return hits
+                            return self._with_repos(hits)
             except OSError:
                 continue
-        return hits
+        return self._with_repos(hits)
+
+    @staticmethod
+    def _grep_label(cwd: str, rows) -> str:
+        return project_label(cwd) if cwd else (rows[0][1] if rows else "")
 
     def recent_sessions(self, scope_cwd: str | None = None, limit: int = 10,
                         now: int | None = None,
                         source: str | None = None,
                         start_ts: int | None = None,
-                        end_ts: int | None = None) -> list[dict]:
+                        end_ts: int | None = None,
+                        project: str | None = None) -> list[dict]:
         self._validate_source(source)
         # Freshest sessions first — answers "what's the current state / how fresh is
         # the index" (the top entry's last_activity IS the effective freshness) and
@@ -386,15 +456,40 @@ class Recall:
         root = repo_root(scope_cwd) if scope_cwd else None
         now = int(time.time()) if now is None else now
         out: list[dict] = []
-        for row_source, sid, project, last_ts, turns in self.store.recent_sessions(
-                root, limit, source=source, start_ts=start_ts, end_ts=end_ts):
+        rows = self.store.recent_sessions(
+            root, limit, source=source, start_ts=start_ts, end_ts=end_ts,
+            project=project)
+        repos = self.store.session_repos(
+            (s, sid) for s, sid, *_ in rows if s in ("claude", "codex"))
+        for row_source, sid, label, last_ts, turns in rows:
+            # Who is doing what, at a glance: the first real ask (not the
+            # side-session envelope or a desktop event), the latest ask and
+            # the latest answer, where it runs and what it actually touches.
+            first_ask = self._ask(sid, row_source, newest=False)
             out.append({
                 "session_id": sid,
                 "source": row_source,
-                "project": project,
+                "project": label,
+                "repos": repos.get((row_source, sid), []),
+                "git_branch": self.store.latest_branch(sid, row_source),
+                "started_by": self.store.started_by(row_source, sid),
                 "turns": turns,
                 "last_activity": last_ts,
                 "last_activity_human": humanize_ts(last_ts, now),
-                "label": _snippet(self.store.first_user_text(sid, row_source), 120),
+                "active": bool(last_ts) and now - last_ts <= ACTIVE_WINDOW_S,
+                "label": _snippet(first_ask or self.store.first_user_text(
+                    sid, row_source), 120),
+                "last_user": _snippet(self._ask(sid, row_source, newest=True) or "", 200),
+                "last_assistant": _snippet(next(iter(self.store.session_texts(
+                    sid, row_source, "assistant", newest=True, limit=1)), ""), 200),
             })
         return out
+
+    def _ask(self, session_id: str, source: str, newest: bool) -> str | None:
+        """The first (or latest) turn in which someone actually asked something."""
+        for text in self.store.session_texts(session_id, source, "user",
+                                             newest=newest, limit=25):
+            ask = human_ask(text)
+            if ask:
+                return ask
+        return None
