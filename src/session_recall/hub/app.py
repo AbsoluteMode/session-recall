@@ -271,7 +271,8 @@ def make_handler(hub: Hub):
             hits = hub.recall.recall_search(
                 query, k=int(body.get("k") or 10),
                 scope_cwd=body.get("scope_cwd"), source=body.get("source"),
-                start_ts=start_ts, end_ts=end_ts)
+                start_ts=start_ts, end_ts=end_ts, project=body.get("project"),
+                per_session=int(body.get("per_session", 2)))
             owners = owners_for(hub, (a.session_id for a in hits))
             self._send(200, {
                 "anchors": [_anchor(a, owners.get(a.session_id)) for a in hits],
@@ -302,7 +303,7 @@ def make_handler(hub: Hub):
             hits = hub.recall.grep(
                 pattern, body.get("session_id"), scope_cwd=body.get("scope_cwd"),
                 source=body.get("source"), limit=int(body.get("limit") or 100),
-                start_ts=start_ts, end_ts=end_ts)
+                start_ts=start_ts, end_ts=end_ts, project=body.get("project"))
             owners = owners_for(hub, (a.session_id for a in hits))
             self._send(200, {
                 "anchors": [_anchor(a, owners.get(a.session_id)) for a in hits]})
@@ -311,7 +312,8 @@ def make_handler(hub: Hub):
             start_ts, end_ts = _range(body)
             sessions = hub.recall.recent_sessions(
                 scope_cwd=body.get("scope_cwd"), limit=int(body.get("limit") or 10),
-                source=body.get("source"), start_ts=start_ts, end_ts=end_ts)
+                source=body.get("source"), start_ts=start_ts, end_ts=end_ts,
+                project=body.get("project"))
             owners = owners_for(hub, (s["session_id"] for s in sessions))
             for session in sessions:
                 session["owner"] = owners.get(session["session_id"])

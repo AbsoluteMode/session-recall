@@ -106,6 +106,20 @@ legible. `grep` escanea bajo demanda **todas** las transcripciones indexadas —
 turnos internos (salida de herramientas, razonamiento) que nunca se convirtieron en
 fragmentos de búsqueda. Solo bajo demanda: sin inyección proactiva de contexto en cada prompt.
 
+**A qué proyecto pertenece una sesión.** El `project` de un ancla es la carpeta donde se
+lanzó la sesión; sus `repos` son aquello en lo que la sesión trabajó de verdad. Cada ruta que
+nombran sus llamadas a herramientas (una edición, un `cd`, un `workdir` de Codex) se resuelve
+al repo git que la contiene — los worktrees y los alias por symlink colapsan a un solo
+checkout — y un repo distinto de la carpeta de lanzamiento necesita al menos tres llamadas
+para contar. Pasa `project="harmonia"` a cualquier herramienta de descubrimiento para obtener
+las sesiones que trabajaron en ese repo, se lanzaran donde se lanzaran; `scope_cwd` también
+las incluye. `recall_search` devuelve como mucho dos anclas por sesión (`per_session`, `0` =
+sin límite) para que una sesión larga no llene la página, y recorta cada fragmento alrededor
+del pasaje que coincide con la consulta. `recent_sessions` se lee como un tablero de estado:
+la primera petición real, la última petición y respuesta, rama, repos, `started_by` (`user`,
+`agent` o `automation`, inferido de los metadatos de la transcripción) y `active` (un turno
+en los últimos 10 minutos).
+
 <details>
 <summary><strong>Ver una llamada completa</strong></summary>
 

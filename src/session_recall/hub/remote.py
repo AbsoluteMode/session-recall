@@ -64,10 +64,12 @@ class RemoteRecall:
 
     def recall_search(self, query: str, k: int = 10, scope_cwd: str | None = None,
                       source: str | None = None, start_ts: int | None = None,
-                      end_ts: int | None = None, **_ignored) -> SearchResult:
+                      end_ts: int | None = None, project: str | None = None,
+                      per_session: int = 2, **_ignored) -> SearchResult:
         body = self._post("/v1/search", {
             "query": query, "k": k, "scope_cwd": scope_cwd, "source": source,
-            "start_ts": start_ts, "end_ts": end_ts})
+            "start_ts": start_ts, "end_ts": end_ts, "project": project,
+            "per_session": per_session})
         return SearchResult(self._anchors(body.get("anchors", [])),
                             body.get("degraded"))
 
@@ -86,18 +88,22 @@ class RemoteRecall:
     def grep(self, pattern: str, session_id: str | None = None,
              scope_cwd: str | None = None, source: str | None = None,
              limit: int = 100, start_ts: int | None = None,
-             end_ts: int | None = None) -> list[Anchor]:
+             end_ts: int | None = None,
+             project: str | None = None) -> list[Anchor]:
         return self._anchors(self._post("/v1/grep", {
             "pattern": pattern, "session_id": session_id, "scope_cwd": scope_cwd,
             "source": source, "limit": limit,
-            "start_ts": start_ts, "end_ts": end_ts}).get("anchors", []))
+            "start_ts": start_ts, "end_ts": end_ts,
+            "project": project}).get("anchors", []))
 
     def recent_sessions(self, scope_cwd: str | None = None, limit: int = 10,
                         source: str | None = None, start_ts: int | None = None,
-                        end_ts: int | None = None) -> list[dict]:
+                        end_ts: int | None = None,
+                        project: str | None = None) -> list[dict]:
         return self._post("/v1/recent", {
             "scope_cwd": scope_cwd, "limit": limit, "source": source,
-            "start_ts": start_ts, "end_ts": end_ts}).get("sessions", [])
+            "start_ts": start_ts, "end_ts": end_ts,
+            "project": project}).get("sessions", [])
 
     def ask(self, question: str, k: int = 12,
             scope_cwd: str | None = None) -> dict:

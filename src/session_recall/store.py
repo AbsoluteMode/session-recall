@@ -2,6 +2,7 @@
 # sqlite3 is compiled without SQLITE_ENABLE_LOAD_EXTENSION, so enable_load_extension()
 # and load_extension() are absent. pysqlite3 (wheel) provides them, which sqlite-vec
 # requires to load vec0. The rest of the API (execute, fetchall, etc.) is identical.
+import os
 import re
 import sqlite3
 if not hasattr(sqlite3.Connection, "enable_load_extension"):
@@ -10,6 +11,7 @@ from pathlib import Path
 import sqlite_vec
 from .config import EMBED_DIM
 from .models import Chunk
+from .repos import owning_repo
 from .scope import scope_clause
 
 _COLS = ["session_id", "uuid", "role", "text", "project", "cwd",
@@ -97,6 +99,29 @@ class Store:
             "CREATE INDEX IF NOT EXISTS idx_chunks_ts ON chunks(ts)")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_source_ts ON chunks(source, ts)")
+        # Per-session facts read from tool calls and metadata (repos.py): which
+        # repos a session worked on and who opened it. Keyed by file_path like
+        # chunks, so the per-file delete/re-index cycle keeps them in step;
+        # repo_scans records which file signature they were computed from.
+        # WHY: docs/decisions/2026-10-25-recall-for-registrar.md
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS session_repos(file_path TEXT, source TEXT, "
+            "session_id TEXT, root TEXT, repo TEXT, touches INTEGER)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_repos_session "
+            "ON session_repos(source, session_id)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_repos_file ON session_repos(file_path)")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS session_info(file_path TEXT, source TEXT, "
+            "session_id TEXT, started_by TEXT)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_info_session "
+            "ON session_info(source, session_id)")
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_info_file ON session_info(file_path)")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS repo_scans(path TEXT PRIMARY KEY, sig TEXT)")
         self.db.commit()
 
     def add(self, chunk: Chunk, embedding: "list[float] | bytes") -> int:
@@ -157,6 +182,74 @@ class Store:
                 f"DELETE FROM {table} WHERE chunk_id IN "
                 "(SELECT id FROM chunks WHERE file_path = ?)", (path,))
         self.db.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
+        self._delete_session_facts(path)
+
+    def _delete_session_facts(self, path: str) -> None:
+        self.db.execute("DELETE FROM session_repos WHERE file_path = ?", (path,))
+        self.db.execute("DELETE FROM session_info WHERE file_path = ?", (path,))
+        self.db.execute("DELETE FROM repo_scans WHERE path = ?", (path,))
+
+    def replace_session_facts(self, path: str, source: str,
+                              sessions: dict[str, tuple[list[tuple[str, int]], str]],
+                              sig: str) -> None:
+        """Swap one file's session facts for a fresh scan.
+
+        `sessions` is session_id -> ([(root, touches), ...], started_by). Not
+        committed here — rides the caller's per-file transaction."""
+        self._delete_session_facts(path)
+        for session_id, (repos, started_by) in sessions.items():
+            for root, touches in repos:
+                self.db.execute(
+                    "INSERT INTO session_repos(file_path, source, session_id, root, "
+                    "repo, touches) VALUES (?, ?, ?, ?, ?, ?)",
+                    (path, source, session_id, root,
+                     os.path.basename(root.rstrip("/")), touches))
+            self.db.execute(
+                "INSERT INTO session_info(file_path, source, session_id, started_by) "
+                "VALUES (?, ?, ?, ?)", (path, source, session_id, started_by))
+        self.db.execute(
+            "INSERT INTO repo_scans(path, sig) VALUES (?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET sig = excluded.sig", (path, sig))
+
+    def repo_scan_sig(self, path: str) -> "str | None":
+        row = self.db.execute(
+            "SELECT sig FROM repo_scans WHERE path = ?", (path,)).fetchone()
+        return row[0] if row else None
+
+    def session_repos(self, keys) -> dict[tuple[str, str], list[dict]]:
+        """(source, session_id) -> [{"repo", "path", "touches"}], most-touched
+        first. A session spread over several files sums its touches."""
+        out: dict[tuple[str, str], list[dict]] = {}
+        for source, session_id in set(keys):
+            rows = self.db.execute(
+                "SELECT root, repo, SUM(touches) t FROM session_repos "
+                "WHERE source = ? AND session_id = ? GROUP BY root "
+                "ORDER BY t DESC, root", (source, session_id)).fetchall()
+            out[(source, session_id)] = [
+                {"repo": repo, "path": root, "touches": int(t or 0)}
+                for root, repo, t in rows]
+        return out
+
+    def started_by(self, source: str, session_id: str) -> "str | None":
+        row = self.db.execute(
+            "SELECT started_by FROM session_info WHERE source = ? AND session_id = ? "
+            "ORDER BY started_by = 'user' LIMIT 1", (source, session_id)).fetchone()
+        return row[0] if row else None
+
+    def sessions_touching(self, root: str | None = None,
+                          repo: str | None = None) -> set[tuple[str, str]]:
+        """(source, session_id) of sessions attributed to a repo root or label."""
+        if root:
+            rows = self.db.execute(
+                "SELECT DISTINCT source, session_id FROM session_repos WHERE root = ?",
+                (owning_repo(root),)).fetchall()
+        elif repo:
+            rows = self.db.execute(
+                "SELECT DISTINCT source, session_id FROM session_repos "
+                "WHERE repo = ? COLLATE NOCASE", (repo,)).fetchall()
+        else:
+            return set()
+        return {(s, sid) for s, sid in rows}
 
     def prune_deleted(self, source: str | None = None) -> int:
         """Drop index rows for transcripts that no longer exist on disk.
@@ -184,13 +277,22 @@ class Store:
     @staticmethod
     def _filters(scope_root: str | None, source: str | None,
                  start_ts: int | None = None, end_ts: int | None = None,
-                 *, alias: str = "c") -> tuple[str, list[object]]:
+                 *, alias: str = "c",
+                 project: str | None = None) -> tuple[str, list[object]]:
         clauses: list[str] = []
         params: list[object] = []
+        touched = (f"EXISTS (SELECT 1 FROM session_repos r WHERE r.source = {alias}.source "
+                   f"AND r.session_id = {alias}.session_id AND ")
         scope, scope_params = scope_clause(f"{alias}.cwd", scope_root)
         if scope:
-            clauses.append(scope)
+            # Launched in the repo, OR worked on it from somewhere else.
+            clauses.append(f"({scope} OR {touched}r.root = ?))")
             params.extend(scope_params)
+            params.append(owning_repo(scope_root))
+        if project:
+            clauses.append(f"({alias}.project = ? COLLATE NOCASE OR "
+                           f"{touched}r.repo = ? COLLATE NOCASE))")
+            params.extend([project, project])
         if source:
             clauses.append(f"{alias}.source = ?")
             params.append(source)
@@ -208,8 +310,10 @@ class Store:
 
     def knn(self, query_vec: list[float], n: int, scope_root: str | None = None,
             source: str | None = None, start_ts: int | None = None,
-            end_ts: int | None = None) -> list[tuple[int, float]]:
-        clause, params = self._filters(scope_root, source, start_ts, end_ts)
+            end_ts: int | None = None,
+            project: str | None = None) -> list[tuple[int, float]]:
+        clause, params = self._filters(scope_root, source, start_ts, end_ts,
+                                       project=project)
         if not clause:
             # The IN-subquery is not a filter, it is the orphan guard: a vec row
             # whose chunk is gone is not a candidate. Scoped queries got this for
@@ -236,12 +340,13 @@ class Store:
 
     def fts(self, query: str, n: int, scope_root: str | None = None,
             source: str | None = None, start_ts: int | None = None,
-            end_ts: int | None = None) -> list[int]:
+            end_ts: int | None = None, project: str | None = None) -> list[int]:
         terms = [t for t in query.split() if t]
         if not terms:
             return []
         match = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
-        clause, params = self._filters(scope_root, source, start_ts, end_ts)
+        clause, params = self._filters(scope_root, source, start_ts, end_ts,
+                                       project=project)
         # ORDER BY rank (bm25, best first) — without it FTS5 returns rowid order
         # and LIMIT keeps an arbitrary oldest slice instead of the best matches.
         if not clause:
@@ -276,12 +381,13 @@ class Store:
 
     def recent_sessions(self, scope_root: str | None, limit: int,
                         source: str | None = None, start_ts: int | None = None,
-                        end_ts: int | None = None) -> list[tuple]:
+                        end_ts: int | None = None,
+                        project: str | None = None) -> list[tuple]:
         """Sessions by most-recent activity (max ts), optionally scoped to a repo.
         Returns (source, session_id, project, last_ts, turns). Tiebreaks make
         equal-timestamp ordering deterministic."""
         clause, params = self._filters(
-            scope_root, source, start_ts, end_ts, alias="chunks")
+            scope_root, source, start_ts, end_ts, alias="chunks", project=project)
         where = f" WHERE {clause}" if clause else ""
         return self.db.execute(
             f"SELECT source, session_id, project, max(ts) AS last_ts, count(*) AS turns "
@@ -296,6 +402,21 @@ class Store:
         row = self.db.execute(
             "SELECT text FROM chunks WHERE session_id = ? AND role = 'user' "
             f"{source_sql} ORDER BY turn_index LIMIT 1", params).fetchone()
+        return row[0] if row else ""
+
+    def session_texts(self, session_id: str, source: str, role: str,
+                      newest: bool, limit: int) -> list[str]:
+        """A session's surface texts of one role, oldest or newest first."""
+        order = "ts DESC, turn_index DESC" if newest else "ts, turn_index"
+        return [r[0] for r in self.db.execute(
+            "SELECT text FROM chunks WHERE session_id = ? AND source = ? AND role = ? "
+            f"ORDER BY {order} LIMIT ?", (session_id, source, role, limit)).fetchall()]
+
+    def latest_branch(self, session_id: str, source: str) -> str:
+        row = self.db.execute(
+            "SELECT git_branch FROM chunks WHERE session_id = ? AND source = ? "
+            "AND git_branch IS NOT NULL AND git_branch != '' "
+            "ORDER BY ts DESC LIMIT 1", (session_id, source)).fetchone()
         return row[0] if row else ""
 
     def get_meta(self, key: str) -> str | None:

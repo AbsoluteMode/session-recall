@@ -38,6 +38,11 @@ class Anchor:
     # both serialise strictly by these fields, and would drop anything else.
     # WHY: docs/decisions/2026-08-06-team-hub-central-index.md
     owner: "str | None" = None
+    # Repos the hit's session actually worked on (from its tool calls), most-
+    # touched first; `project` above is only the folder it was launched in.
+    # None where attribution does not apply (Cursor, meta docs).
+    # WHY: docs/decisions/2026-10-25-recall-for-registrar.md
+    repos: "list[str] | None" = None
 
 @dataclass
 class Turn:
