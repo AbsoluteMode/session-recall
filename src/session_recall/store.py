@@ -415,6 +415,21 @@ class Store:
             data[k] = int(data[k])
         return Chunk(**data)
 
+    def get_chunks(self, chunk_ids) -> "dict[int, Chunk]":
+        """Batched get_chunk: ids that died mid-search are simply absent."""
+        ids = list(chunk_ids)
+        out: dict[int, Chunk] = {}
+        for start in range(0, len(ids), 500):
+            batch = ids[start:start + 500]
+            for row in self.db.execute(
+                    f"SELECT id, {', '.join(_COLS)} FROM chunks "
+                    f"WHERE id IN ({', '.join('?' * len(batch))})", batch):
+                data = dict(zip(_COLS, row[1:]))
+                for k in _INT_COLS:
+                    data[k] = int(data[k])
+                out[row[0]] = Chunk(**data)
+        return out
+
     def recent_sessions(self, scope_root: str | None, limit: int,
                         source: str | None = None, start_ts: int | None = None,
                         end_ts: int | None = None,

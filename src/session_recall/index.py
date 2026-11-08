@@ -85,8 +85,10 @@ def _sig_embed_fp(sig: str) -> str:
     """The embedding fingerprint a stored file signature was built in.
     Format: <extractor tag>:<embed fp>:<stat parts>; a legacy pre-fingerprint
     sig (3 parts) has none."""
-    parts = sig.split(":")
-    return parts[1] if len(parts) >= 4 else ""
+    parts = sig.split(":")[1:]           # drop the extractor tag
+    while parts and parts[-1].isdigit():  # drop the stat fields
+        parts.pop()
+    return ":".join(parts)               # a model alias may itself contain ':'
 
 
 def _forget_file(store: Store, path: str):

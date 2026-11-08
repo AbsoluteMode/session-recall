@@ -46,6 +46,9 @@ RECENCY_TAU_S = 30 * 86400
 # and each turn keeps at most PIECES_PER_TURN of them before reranking.
 CANDIDATE_FACTOR = 3
 PIECES_PER_TURN = 3
+# sqlite-vec 0.1.9 refuses k > 4096; fts5 has no such limit but a pool is a pool.
+KNN_MAX = 4096
+FTS_MAX = 4096
 _TEMPORAL = re.compile(
     r"(?i)(?<!\w)(последн\w*|сейчас|текущ\w*|актуальн\w*|недавн\w*|свеж\w*|"
     r"сегодня|вчера|на этой неделе|latest|newest|current(?:ly)?|recent(?:ly)?|"
@@ -137,6 +140,34 @@ class Recall:
                 a.repos = [r["repo"] for r in found]
         return anchors
 
+    def _pool(self, fetch, want: int, chunk_by_id: dict, hard_max: int) -> list[int]:
+        """Ordered candidate ids from `fetch(n)`, at most PIECES_PER_TURN per
+        turn, at most 2*want in all. The pool is widened (x CANDIDATE_FACTOR,
+        up to hard_max) while the cap leaves fewer than `want` candidates and
+        the fetch was still full: one answer split into 350 pieces must not be
+        the whole page. Chunks read along the way land in chunk_by_id."""
+        n = min(want * CANDIDATE_FACTOR, hard_max)
+        while True:
+            ids = fetch(n)
+            chunk_by_id.update(self.store.get_chunks(
+                cid for cid in ids if cid not in chunk_by_id))
+            pieces: dict[tuple, int] = {}
+            kept: list[int] = []
+            for cid in ids:
+                c = chunk_by_id.get(cid)
+                if c is None:
+                    continue  # deleted mid-search: costs its own slot, not the search
+                turn = (c.source, c.session_id, c.uuid)
+                if pieces.get(turn, 0) >= PIECES_PER_TURN:
+                    continue
+                pieces[turn] = pieces.get(turn, 0) + 1
+                kept.append(cid)
+                if len(kept) >= 2 * want:
+                    break
+            if len(kept) >= want or len(ids) < n or n >= hard_max:
+                return kept
+            n = min(n * CANDIDATE_FACTOR, hard_max)
+
     def recall_search(self, query: str, k: int = 10, candidates: int = 100,
                       scope_cwd: str | None = None,
                       source: str | None = None,
@@ -154,10 +185,10 @@ class Recall:
         roles = DEFAULT_ROLES + (("summary",) if include_summaries else ())
         now = int(time.time()) if now is None else now
         recent = bool(recent_first) or (recent_first is None and asks_for_current(query))
-        pool = candidates * CANDIDATE_FACTOR
-        order: list[int] = []
-        dist: dict[int, float | None] = {}
         degraded: str | None = None
+        knn_ids: list[int] = []
+        dist: dict[int, float] = {}
+        chunk_by_id: dict = {}
         stored_fp = self.store.get_meta("embed_fp")
         if stored_fp and stored_fp != config.embed_fingerprint():
             # A same-dim model swap passes the schema check but puts the query
@@ -176,12 +207,14 @@ class Recall:
         else:
             try:
                 qv = self.embedder.embed_query(query)
-                for cid, d in self.store.knn(
-                        qv, pool, scope_root=root, source=source,
-                        start_ts=start_ts, end_ts=end_ts, project=project,
-                        roles=roles):
-                    order.append(cid)
-                    dist[cid] = d
+
+                def knn(n):
+                    rows = self.store.knn(
+                        qv, n, scope_root=root, source=source, start_ts=start_ts,
+                        end_ts=end_ts, project=project, roles=roles)
+                    dist.update(rows)
+                    return [cid for cid, _ in rows]
+                knn_ids = self._pool(knn, candidates, chunk_by_id, KNN_MAX)
             except Exception as exc:
                 # WHY: docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md
                 # Embedding unavailable -> FTS-only. Never hard-fail: keyword hits still
@@ -190,43 +223,34 @@ class Recall:
                 # instead of fixing the embedder.
                 degraded = (f"fts-only: embeddings unavailable, semantic ranking is off — "
                             f"only literal word matches are returned ({type(exc).__name__}: {exc})")
-        for cid in self.store.fts(
-                query, pool, scope_root=root, source=source,
-                start_ts=start_ts, end_ts=end_ts, project=project, roles=roles):
-            if cid not in dist:
-                order.append(cid)
-                dist[cid] = None  # keyword match, no vector distance
+
+        def fts(n):
+            return self.store.fts(
+                query, n, scope_root=root, source=source, start_ts=start_ts,
+                end_ts=end_ts, project=project, roles=roles)
+        # Keyword hits are the exact-identifier path (an error string, a
+        # symbol): they get their own per-turn cap and are never trimmed away
+        # by the semantic pool.
+        fts_ids = self._pool(fts, candidates, chunk_by_id, FTS_MAX)
+        order = knn_ids + [cid for cid in fts_ids if cid not in dist]
         if not order:
             return SearchResult([], degraded)
         # Collapse exact duplicates (same content across resumed sessions / sidechains) so
         # identical text never wastes two top-k slots. All rows stay in the DB (provenance);
-        # we keep the highest-priority occurrence (KNN order, then FTS).
+        # we keep the highest-priority occurrence (KNN order, then FTS) — or, when the
+        # caller wants what is current, the newest one.
         kept_by_hash: dict[str, int] = {}
-        pieces_of: dict[tuple, int] = {}
         distinct: list[int] = []
-        chunk_by_id = {}
         for cid in order:
-            c = self.store.get_chunk(cid)
-            if c is None:
-                continue  # deleted mid-search: costs its own slot, not the search
+            c = chunk_by_id[cid]
             kept = kept_by_hash.get(c.content_hash)
             if kept is not None:
-                # Same text in two places: when the caller wants what is
-                # current, the newer occurrence stands for both.
                 if recent and c.ts > chunk_by_id[kept].ts:
-                    chunk_by_id[cid] = c
                     distinct[distinct.index(kept)] = cid
                     kept_by_hash[c.content_hash] = cid
-                    del chunk_by_id[kept]
                 continue
-            turn = (c.source, c.session_id, c.uuid)
-            if pieces_of.get(turn, 0) >= PIECES_PER_TURN:
-                continue
-            pieces_of[turn] = pieces_of.get(turn, 0) + 1
             kept_by_hash[c.content_hash] = cid
-            chunk_by_id[cid] = c
             distinct.append(cid)
-        distinct = distinct[:candidates * 2]
 
         # Rerank if a reranker is configured AND reachable. The reranker is OPTIONAL (some
         # embedding providers ship none) and may be down — either way we fall back to the

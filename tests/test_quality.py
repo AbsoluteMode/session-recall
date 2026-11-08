@@ -428,3 +428,91 @@ def test_metadocs_collector_keeps_a_split_turn_together(tmp_path):
     (upd,) = collect.pending_sessions(store.db, project, Watermarks(tmp_path / "marks.json"))
     assert [t["role"] for t in upd.turns] == ["user", "assistant"]
     assert "Paragraph 0." in upd.turns[1]["text"] and "Paragraph 5." in upd.turns[1]["text"]
+
+
+# --- 7. review findings, second pass ------------------------------------------------
+
+def test_keyword_exact_match_survives_a_full_semantic_pool(tmp_path):
+    """FTS is the exact-identifier path. 300 semantically-near turns must not
+    push the one row containing the error string out of the candidates."""
+    lines = [user("many", "u0", T0, "logs?")]
+    lines += [assistant("many", f"a{i}", T0 + i, f"Routine deploy note number {i}, all green.")
+              for i in range(1, 320)]
+    lines.append(assistant("many", "needle", T0 + 400,
+                           "Build failed: NEEDLE_EXACT_ERROR in the tokenizer step."))
+    write_session(tmp_path / "projects", "many", lines)
+    _, recall = _build(tmp_path)
+    hits = recall.recall_search("NEEDLE_EXACT_ERROR", k=5, per_session=0)
+    assert hits and hits[0].uuid == "needle"
+
+
+def test_three_hundred_pieces_still_leave_room_for_another_turn(tmp_path):
+    long = "\n\n".join(f"cache failure {i} " + "detail " * 275 for i in range(300))
+    write_session(tmp_path / "projects", "long", [
+        user("l", "u1", T0, "why?"), assistant("l", "a1", T0 + 1, long)])
+    write_session(tmp_path / "projects", "short", [
+        user("s", "u1", T0 + 10, "why?"),
+        assistant("s", "a1", T0 + 11, "The cache failure came from the tokenizer.")])
+    _, recall = _build(tmp_path)
+    hits = recall.recall_search("cache failure", k=10, per_session=0)
+    assert {h.session_id for h in hits} == {"l", "s"}
+
+
+def test_large_candidates_argument_stays_within_sqlite_vec_limit(tmp_path):
+    write_session(tmp_path / "projects", "one", [
+        user("o", "u1", T0, "needle?"), assistant("o", "a1", T0 + 1, "a needle in sqlite")])
+    _, recall = _build(tmp_path)
+    hits = recall.recall_search("needle", k=5, candidates=2000)
+    assert hits.degraded is None and hits
+
+
+def test_duplicate_replacement_keeps_other_pieces_of_the_old_turn(tmp_path):
+    shared = "Release 62 merged successfully."
+    write_session(tmp_path / "projects", "older", [
+        user("older", "u1", T0 - 100 * DAY, "?"),
+        assistant("older", "a1", T0 - 100 * DAY + 1, shared),
+        assistant("older", "a2", T0 - 100 * DAY + 2, "Release 62 notes: NEEDLE_EXACT_ERROR fixed."),
+    ])
+    write_session(tmp_path / "projects", "newer", [
+        user("newer", "u1", T0 - DAY, "?"), assistant("newer", "a1", T0 - DAY + 1, shared)])
+    _, recall = _build(tmp_path)
+    hits = recall.recall_search("Release 62 NEEDLE_EXACT_ERROR", k=10, per_session=0,
+                                recent_first=True, now=T0)
+    uuids = {(h.session_id, h.uuid) for h in hits}
+    assert ("older", "a2") in uuids and ("newer", "a1") in uuids
+    assert ("older", "a1") not in uuids
+
+
+def test_sig_embed_fp_tolerates_colons_in_model_names():
+    from session_recall.index import _sig_embed_fp
+    assert _sig_embed_fp("v3:openai-compatible/nomic-embed-text:latest/1024:123:456") == \
+        "openai-compatible/nomic-embed-text:latest/1024"
+    assert _sig_embed_fp("codex-v3:inference-api/embedder/4096/abcd:77:123:456") == \
+        "inference-api/embedder/4096/abcd"
+    assert _sig_embed_fp("v2:123:456") == ""
+
+
+def test_join_pieces_removes_the_shared_overlap():
+    from session_recall.chunking import join_pieces
+    text = " ".join(f"w{i:04d}" for i in range(650)) + " FINAL_VERDICT"
+    pieces = split_text(text)
+    assert len(pieces) > 1
+    whole = pieces[0]
+    for piece in pieces[1:]:
+        whole = join_pieces(whole, piece)
+    assert whole == text
+    assert join_pieces("abc", "xyz") == "abc\nxyz"
+
+
+def test_metadocs_collector_does_not_duplicate_overlap(tmp_path):
+    from session_recall.metadocs import collect
+    from session_recall.metadocs.config import Watermarks
+    text = " ".join(f"w{i:04d}" for i in range(650)) + " FINAL_VERDICT"
+    write_session(tmp_path / "projects", "md2", [
+        user("m", "u1", T0, "итог?"), assistant("m", "a1", T0 + 1, text)])
+    store, _ = _build(tmp_path)
+    project = store.db.execute("SELECT project FROM chunks LIMIT 1").fetchone()[0]
+    (upd,) = collect.pending_sessions(store.db, project, Watermarks(tmp_path / "marks.json"))
+    merged = upd.turns[1]["text"]
+    assert merged.endswith("FINAL_VERDICT") and merged.count("w0100") == 1
+    assert "_full" not in upd.turns[1]

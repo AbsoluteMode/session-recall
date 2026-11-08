@@ -88,6 +88,16 @@ def split_text(text: str, max_chars: int = MAX_CHARS,
     return pieces
 
 
+def join_pieces(first: str, second: str, sep: str = "\n") -> str:
+    """Concatenate two consecutive pieces of one turn without repeating the
+    overlap they share; falls back to a plain join when they share none."""
+    limit = min(len(first), len(second), OVERLAP * 2)
+    for n in range(limit, 0, -1):
+        if first.endswith(second[:n]):
+            return first + second[n:]
+    return first + sep + second
+
+
 def surface_pieces(role: str, text: str) -> list[str]:
     """The index rows one surface turn becomes. Summaries and automation
     stay whole: the former is excluded by default and reuses its vector

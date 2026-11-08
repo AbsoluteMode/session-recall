@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import PROJECT_ALL, PROJECT_GIT, Watermarks
+from ..chunking import join_pieces
 
 MAX_CALL_CHARS = 60_000    # per-CALL ceiling: chapter split for marathon sessions
 MAX_TURN_CHARS = 4_000     # one pasted log must not eat a whole chapter
@@ -114,11 +115,16 @@ def pending_sessions(db: sqlite3.Connection, project: str, marks: Watermarks,
         # the watermark advance past pieces that were never distilled.
         key = (source, sid, uuid, role)
         if key == last_turn and upd.turns:
-            upd.turns[-1]["text"] = (upd.turns[-1]["text"] + "\n" + text)[:MAX_TURN_CHARS]
+            whole = join_pieces(upd.turns[-1].pop("_full", upd.turns[-1]["text"]), text)
+            upd.turns[-1]["_full"] = whole
+            upd.turns[-1]["text"] = whole[:MAX_TURN_CHARS]
             continue
         last_turn = key
         upd.turns.append({"source": source, "session_id": sid, "role": role,
                           "text": text[:MAX_TURN_CHARS], "ts": ts})
+    for upd in per.values():
+        for turn in upd.turns:
+            turn.pop("_full", None)
     return sorted(per.values(), key=lambda u: u.turns[0]["ts"])
 
 
