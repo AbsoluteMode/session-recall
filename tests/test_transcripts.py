@@ -210,8 +210,8 @@ def test_claude_passthrough_and_version_validation(tmp_path):
            "message": {"role": "user", "content": "hello"}}
     path.write_text(json.dumps(raw) + "\n")
     assert read_transcript(str(path), "claude") == [raw]
-    assert extractor_version("claude") == "2"
-    assert extractor_version("codex") == "2"
+    assert extractor_version("claude") == "3"
+    assert extractor_version("codex") == "3"
     assert extractor_version("cursor") == "2"
     with pytest.raises(ValueError, match="unknown transcript source"):
         read_transcript(str(path), "other")

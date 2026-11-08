@@ -11,6 +11,7 @@ from pathlib import Path
 import sqlite_vec
 from .config import EMBED_DIM
 from .models import Chunk
+from .snippets import stem
 from .repos import owning_repo
 from .scope import scope_clause
 
@@ -18,6 +19,26 @@ _COLS = ["session_id", "uuid", "role", "text", "project", "cwd",
          "git_branch", "ts", "file_path", "byte_offset", "byte_len",
          "turn_index", "content_hash", "source"]
 _INT_COLS = {"ts", "byte_offset", "byte_len", "turn_index"}
+_EDGE_PUNCT = "\"'`«»“”‘’()[]{}<>.,;:!?…"
+
+
+def fts_match(query: str) -> str:
+    """FTS5 MATCH expression for a natural-language query.
+
+    Punctuation around a word is stripped and a word without a letter or
+    digit is dropped (the tokenizer would never match it). Words shorter
+    than three characters are dropped unless they carry a digit (an
+    "и"/"на"/"the" matches every row and only costs rank time); if nothing
+    survives, every word is kept. Each word is cut to a crude stem and
+    matched as a prefix, so "Гармонии" finds "Гармония" and "indexing"
+    finds "indexed" — fts5's unicode61 tokenizer has no stemmer for either
+    language."""
+    words = [w for w in (t.strip(_EDGE_PUNCT) for t in query.split())
+             if any(ch.isalnum() for ch in w)]
+    terms = [t for t in words
+             if len(t) >= 3 or any(ch.isdigit() for ch in t)] or words
+    return " OR ".join(
+        '"' + stem(t).replace('"', '""') + '"*' for t in terms)
 
 
 class Store:
@@ -124,10 +145,13 @@ class Store:
             "CREATE TABLE IF NOT EXISTS repo_scans(path TEXT PRIMARY KEY, sig TEXT)")
         self.db.commit()
 
-    def add(self, chunk: Chunk, embedding: "list[float] | bytes") -> int:
+    def add(self, chunk: Chunk, embedding: "list[float] | bytes | None") -> int:
         """Insert one chunk. `embedding` is either a fresh vector or an already
         serialized float32 blob (reused verbatim from a previous index of the
-        same content — see index.index_corpus). Writes are NOT committed here:
+        same content — see index.index_corpus), or None for a row that is kept
+        for provenance only (an automation heartbeat): it gets an fts row, so
+        grep-style lookups and session counts see it, but no vector, so it
+        can never surface as a semantic hit. Writes are NOT committed here:
         the caller owns the transaction boundary (one commit per file), so a
         failure mid-file rolls back to the previous good state instead of
         leaving a half-indexed transcript. Store.close() commits pending work."""
@@ -135,8 +159,11 @@ class Store:
         cur = self.db.execute(
             f"INSERT INTO chunks({', '.join(_COLS)}) VALUES ({', '.join('?' * len(_COLS))})", vals)
         cid = cur.lastrowid
-        blob = embedding if isinstance(embedding, bytes) else sqlite_vec.serialize_float32(embedding)
-        self.db.execute("INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)", (cid, blob))
+        if embedding is not None:
+            blob = (embedding if isinstance(embedding, bytes)
+                    else sqlite_vec.serialize_float32(embedding))
+            self.db.execute(
+                "INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)", (cid, blob))
         self.db.execute("INSERT INTO fts_chunks(text, chunk_id) VALUES (?, ?)", (chunk.text, cid))
         return cid
 
@@ -151,17 +178,18 @@ class Store:
             "JOIN vec_chunks v ON v.chunk_id = c.id WHERE c.file_path = ?", (path,))}
 
     def embeddings_by_session(self, session_id: str, source: str,
-                              sig_prefix: str) -> dict[str, bytes]:
+                              embed_fp: str) -> dict[str, bytes]:
         """Reuse vectors when a transcript moves (for example into Codex's
         archive directory). Only rows whose file signature proves the current
-        extractor/embedding space are eligible."""
+        embedding space are eligible; the extractor version does not matter,
+        a vector depends on the text and the embedder alone."""
         return {content_hash: embedding for content_hash, embedding in self.db.execute(
             "SELECT c.content_hash, v.embedding FROM chunks c "
             "JOIN vec_chunks v ON v.chunk_id = c.id "
             "JOIN indexed_files f ON f.path = c.file_path "
             "WHERE c.session_id = ? AND c.source = ? "
-            "AND substr(f.sig, 1, ?) = ?",
-            (session_id, source, len(sig_prefix), sig_prefix),
+            "AND instr(f.sig, ?) > 0",
+            (session_id, source, f":{embed_fp}:"),
         )}
 
     def delete_file(self, path: str):
@@ -278,9 +306,16 @@ class Store:
     def _filters(scope_root: str | None, source: str | None,
                  start_ts: int | None = None, end_ts: int | None = None,
                  *, alias: str = "c",
-                 project: str | None = None) -> tuple[str, list[object]]:
+                 project: str | None = None,
+                 roles: "tuple[str, ...] | None" = None) -> tuple[str, list[object]]:
         clauses: list[str] = []
         params: list[object] = []
+        if roles:
+            # Which kinds of turn may rank. Summaries and automation rows stay
+            # in the table for the status board; recall_search names the roles
+            # it wants. WHY: docs/decisions/2026-11-08-recall-noise-recency-subchunks.md
+            clauses.append(f"{alias}.role IN ({', '.join('?' * len(roles))})")
+            params.extend(roles)
         touched = (f"EXISTS (SELECT 1 FROM session_repos r WHERE r.source = {alias}.source "
                    f"AND r.session_id = {alias}.session_id AND ")
         scope, scope_params = scope_clause(f"{alias}.cwd", scope_root)
@@ -311,9 +346,10 @@ class Store:
     def knn(self, query_vec: list[float], n: int, scope_root: str | None = None,
             source: str | None = None, start_ts: int | None = None,
             end_ts: int | None = None,
-            project: str | None = None) -> list[tuple[int, float]]:
+            project: str | None = None,
+            roles: "tuple[str, ...] | None" = None) -> list[tuple[int, float]]:
         clause, params = self._filters(scope_root, source, start_ts, end_ts,
-                                       project=project)
+                                       project=project, roles=roles)
         if not clause:
             # The IN-subquery is not a filter, it is the orphan guard: a vec row
             # whose chunk is gone is not a candidate. Scoped queries got this for
@@ -340,13 +376,13 @@ class Store:
 
     def fts(self, query: str, n: int, scope_root: str | None = None,
             source: str | None = None, start_ts: int | None = None,
-            end_ts: int | None = None, project: str | None = None) -> list[int]:
-        terms = [t for t in query.split() if t]
-        if not terms:
+            end_ts: int | None = None, project: str | None = None,
+            roles: "tuple[str, ...] | None" = None) -> list[int]:
+        match = fts_match(query)
+        if not match:
             return []
-        match = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
         clause, params = self._filters(scope_root, source, start_ts, end_ts,
-                                       project=project)
+                                       project=project, roles=roles)
         # ORDER BY rank (bm25, best first) — without it FTS5 returns rowid order
         # and LIMIT keeps an arbitrary oldest slice instead of the best matches.
         if not clause:
@@ -389,19 +425,25 @@ class Store:
         clause, params = self._filters(
             scope_root, source, start_ts, end_ts, alias="chunks", project=project)
         where = f" WHERE {clause}" if clause else ""
+        # turns counts turns, not rows: a long turn is several sub-chunks.
         return self.db.execute(
-            f"SELECT source, session_id, project, max(ts) AS last_ts, count(*) AS turns "
+            f"SELECT source, session_id, project, max(ts) AS last_ts, "
+            f"count(DISTINCT uuid) AS turns "
             f"FROM chunks{where} GROUP BY source, session_id "
             f"ORDER BY last_ts DESC, source, session_id LIMIT ?",
             (*params, limit)).fetchall()
 
     def first_user_text(self, session_id: str, source: str | None = None) -> str:
-        """The session's earliest user prompt — a human label for the session."""
+        """The session's earliest user prompt — a human label for the session.
+        A session made only of heartbeats has no prompt; its first heartbeat
+        is the best label there is."""
         source_sql = " AND source = ?" if source else ""
         params = (session_id, source) if source else (session_id,)
         row = self.db.execute(
-            "SELECT text FROM chunks WHERE session_id = ? AND role = 'user' "
-            f"{source_sql} ORDER BY turn_index LIMIT 1", params).fetchone()
+            "SELECT text FROM chunks WHERE session_id = ? "
+            "AND role IN ('user', 'automation') "
+            f"{source_sql} ORDER BY role = 'user' DESC, turn_index LIMIT 1",
+            params).fetchone()
         return row[0] if row else ""
 
     def session_texts(self, session_id: str, source: str, role: str,

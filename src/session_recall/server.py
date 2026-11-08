@@ -25,6 +25,8 @@ def _adict(a) -> dict:
         d.pop("owner", None)
     if d.get("repos") is None:
         d.pop("repos", None)
+    if d.get("stale") is None:
+        d.pop("stale", None)
     return d
 
 
@@ -61,10 +63,21 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
                   source: str | None = None, start_date: str | None = None,
                   end_date: str | None = None, timezone: str | None = None,
                   on_date: str | None = None, project: str | None = None,
-                  per_session: int = 2) -> dict:
+                  per_session: int = 2, include_summaries: bool = False,
+                  recent_first: bool | None = None) -> dict:
     """Semantically search past Claude Code, Codex and Cursor sessions.
 
     Returns {"anchors": [...ranked anchors...], "degraded": null | str}.
+
+    Ranking is relevance (score). When the query asks for what is current
+    ("последний", "сейчас", "latest", "now", ...) or recent_first=true, newer
+    turns get a recency bonus on top, so the order may differ from the score
+    order; recent_first=false turns that off. A hit with "stale": true is a
+    meta-docs record older than 30 days — prefer a newer transcript turn
+    that says otherwise. Automation heartbeats never rank; compacted-session
+    summaries ("This session is being continued…") are left out unless
+    include_summaries=true, since every fact in them also lives in the turns
+    they summarize. A long turn is returned once, as its best-matching part.
 
     degraded is non-null when the embedding provider was unreachable and the search
     fell back to literal keyword matching: semantic ranking is OFF, so a thin result
@@ -85,6 +98,9 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     launched — plus sessions launched in a folder of that name.
     per_session: at most this many hits per session before other sessions get
     the slots (back-filled when history is narrow); 0 = no cap.
+    include_summaries: also rank compacted-session summaries (default false).
+    recent_first: true = add the recency bonus, false = never, omit = only when
+    the query asks for what is current.
     source: optionally restrict to "claude", "codex", or "cursor"; omit for the
     shared index.
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD). Either may
@@ -97,7 +113,8 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     hits = _r().recall_search(
         query, k=k, scope_cwd=scope_cwd, source=source,
         start_ts=start_ts, end_ts=end_ts, project=project,
-        per_session=per_session)
+        per_session=per_session, include_summaries=include_summaries,
+        recent_first=recent_first)
     return {"anchors": [_adict(a) for a in hits],
             "degraded": getattr(hits, "degraded", None)}
 

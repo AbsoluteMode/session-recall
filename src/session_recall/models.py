@@ -43,6 +43,11 @@ class Anchor:
     # None where attribution does not apply (Cursor, meta docs).
     # WHY: docs/decisions/2026-10-25-recall-for-registrar.md
     repos: "list[str] | None" = None
+    # True on a meta-docs hit older than the staleness window: the record may
+    # describe a state the transcripts have since moved past, so a newer turn
+    # outranks it as evidence. None where it does not apply.
+    # WHY: docs/decisions/2026-11-08-recall-noise-recency-subchunks.md
+    stale: "bool | None" = None
 
 @dataclass
 class Turn:

@@ -110,6 +110,16 @@ query. `recent_sessions` reads like a status board: the first real ask, the late
 answer, branch, repos, `started_by` (`user`, `agent` or `automation`, inferred from
 transcript metadata) and `active` (a turn in the last 10 minutes).
 
+**What ranks.** Automation heartbeats (`<heartbeat>` prompts and replies) are stored for the
+status board but never embedded or ranked. Compacted-session summaries ("This session is being
+continued…") are left out of `recall_search` unless `include_summaries=true`: every fact in
+them also lives in the turns they summarize, and their keyword density used to outrank those
+turns. A long turn is indexed as overlapping sub-chunks and returned once, as its
+best-matching part, so the tail of a 20 KB answer is as findable as its opening. When the
+query asks for what is current ("latest", "now", "последний", "сейчас"…) or
+`recent_first=true`, newer turns get a small recency bonus on top of relevance; `score`
+stays pure relevance. A meta-docs hit older than 30 days carries `"stale": true`.
+
 <details>
 <summary><strong>See a complete call</strong></summary>
 

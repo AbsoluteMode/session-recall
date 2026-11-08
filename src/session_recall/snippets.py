@@ -36,10 +36,18 @@ def strip_boilerplate(text: str) -> str:
     return _COMPACTION.sub("", text, count=1)
 
 
-def _stem(term: str) -> str:
-    # Crude, language-agnostic prefix match: "Гармония"/"Гармонии",
-    # "indexing"/"indexed" meet on a shared prefix.
+def is_compaction(text: str) -> bool:
+    """A compacted session's summary: machine-written, not a person asking."""
+    return bool(_COMPACTION.match(text or ""))
+
+
+def stem(term: str) -> str:
+    """Crude, language-agnostic prefix: "Гармония"/"Гармонии",
+    "indexing"/"indexed" meet on a shared prefix."""
     return term if len(term) <= 4 else term[:max(4, len(term) - 2)]
+
+
+_stem = stem
 
 
 def query_snippet(text: str, query: str, n: int = 200) -> str:

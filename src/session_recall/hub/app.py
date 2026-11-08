@@ -272,7 +272,10 @@ def make_handler(hub: Hub):
                 query, k=int(body.get("k") or 10),
                 scope_cwd=body.get("scope_cwd"), source=body.get("source"),
                 start_ts=start_ts, end_ts=end_ts, project=body.get("project"),
-                per_session=int(body.get("per_session", 2)))
+                per_session=int(body.get("per_session", 2)),
+                include_summaries=bool(body.get("include_summaries", False)),
+                recent_first=(None if body.get("recent_first") is None
+                              else bool(body.get("recent_first"))))
             owners = owners_for(hub, (a.session_id for a in hits))
             self._send(200, {
                 "anchors": [_anchor(a, owners.get(a.session_id)) for a in hits],

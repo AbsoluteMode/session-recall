@@ -120,6 +120,17 @@ la primera petición real, la última petición y respuesta, rama, repos, `start
 `agent` o `automation`, inferido de los metadatos de la transcripción) y `active` (un turno
 en los últimos 10 minutos).
 
+**Qué se clasifica.** Los latidos de automatización (prompts y respuestas `<heartbeat>`) se
+guardan para el tablero de estado, pero nunca se incrustan ni se clasifican. Los resúmenes de
+sesiones compactadas ("This session is being continued…") quedan fuera de `recall_search`
+salvo con `include_summaries=true`: cada hecho que contienen vive también en los turnos que
+resumen, y su densidad de palabras clave solía superar a esos turnos. Un turno largo se indexa
+como sub-fragmentos solapados y se devuelve una sola vez, con su parte que mejor coincide,
+así que el final de una respuesta de 20 KB se encuentra igual que su inicio. Cuando la
+consulta pregunta por lo actual ("latest", "now", "último", "ahora"…) o `recent_first=true`,
+los turnos más nuevos reciben un pequeño bono de recencia sobre la relevancia; `score` sigue
+siendo relevancia pura. Un resultado de meta docs con más de 30 días lleva `"stale": true`.
+
 <details>
 <summary><strong>Ver una llamada completa</strong></summary>
 

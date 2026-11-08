@@ -1,8 +1,11 @@
 # src/session_recall/retrieve.py
 import json
+import math
+import re
 import time
 from collections import deque
 from . import config
+from .chunking import DEFAULT_ROLES
 from .store import Store
 from .embed import Embedder
 from .rerank import Reranker
@@ -26,6 +29,32 @@ def _snippet(text: str, n: int = 200) -> str:
 PER_SESSION = 2
 # "Active" in recent_sessions: some turn landed within this window.
 ACTIVE_WINDOW_S = 600
+# A meta-docs record older than this is flagged stale: the generator that
+# writes them runs on its own schedule and may have stopped, while the
+# transcripts it distils keep moving.
+STALE_DOC_S = 30 * 86400
+# Recency prior. The reranker scores relevance only, so "the latest PR" is
+# answered with the July PR when the October one phrases it less closely.
+# When the query asks for what is current (or the caller says recent_first),
+# each hit gets RECENCY_WEIGHT * exp(-age / RECENCY_TAU) on top of its score:
+# today +0.20, a month ago +0.07, three months ago +0.01 — enough to break
+# the near-ties that matter, never enough to lift an irrelevant hit.
+RECENCY_WEIGHT = 0.2
+RECENCY_TAU_S = 30 * 86400
+# A long turn is many sub-chunks; left alone they could fill the whole
+# candidate pool with one answer. Candidates are over-fetched by this factor
+# and each turn keeps at most PIECES_PER_TURN of them before reranking.
+CANDIDATE_FACTOR = 3
+PIECES_PER_TURN = 3
+_TEMPORAL = re.compile(
+    r"(?i)(?<!\w)(последн\w*|сейчас|текущ\w*|актуальн\w*|недавн\w*|свеж\w*|"
+    r"сегодня|вчера|на этой неделе|latest|newest|current(?:ly)?|recent(?:ly)?|"
+    r"now|today|yesterday|this week)(?!\w)")
+
+
+def asks_for_current(query: str) -> bool:
+    """Does the wording ask for the current state rather than any time?"""
+    return bool(_TEMPORAL.search(query or ""))
 
 
 def diversify(items: list, k: int, per_session: int, key) -> list:
@@ -88,10 +117,14 @@ class Recall:
                 f"source must be 'claude', 'codex', 'cursor', or omitted; got {source!r}")
 
     @staticmethod
-    def _anchor(c, score: "float | None", query: str = "") -> Anchor:
+    def _anchor(c, score: "float | None", query: str = "",
+                now: int | None = None) -> Anchor:
+        now = int(time.time()) if now is None else now
+        stale = (True if c.source == "metadocs" and c.ts and now - c.ts > STALE_DOC_S
+                 else None)
         return Anchor(session_id=c.session_id, uuid=c.uuid, role=c.role,
                       snippet=query_snippet(c.text, query), score=score,
-                      project=c.project, when=c.ts, source=c.source)
+                      project=c.project, when=c.ts, source=c.source, stale=stale)
 
     def _with_repos(self, anchors: list[Anchor]) -> list[Anchor]:
         """Attach each hit's session attribution (labels, most-touched first)."""
@@ -110,11 +143,18 @@ class Recall:
                       start_ts: int | None = None,
                       end_ts: int | None = None,
                       project: str | None = None,
-                      per_session: int = PER_SESSION) -> list[Anchor]:
+                      per_session: int = PER_SESSION,
+                      include_summaries: bool = False,
+                      recent_first: bool | None = None,
+                      now: int | None = None) -> list[Anchor]:
         self._validate_source(source)
         # scope_cwd is the agent's raw cwd; normalize to a repo root so the main
         # checkout and every worktree under it collapse to one scope. None = global.
         root = repo_root(scope_cwd) if scope_cwd else None
+        roles = DEFAULT_ROLES + (("summary",) if include_summaries else ())
+        now = int(time.time()) if now is None else now
+        recent = bool(recent_first) or (recent_first is None and asks_for_current(query))
+        pool = candidates * CANDIDATE_FACTOR
         order: list[int] = []
         dist: dict[int, float | None] = {}
         degraded: str | None = None
@@ -137,8 +177,9 @@ class Recall:
             try:
                 qv = self.embedder.embed_query(query)
                 for cid, d in self.store.knn(
-                        qv, candidates, scope_root=root, source=source,
-                        start_ts=start_ts, end_ts=end_ts, project=project):
+                        qv, pool, scope_root=root, source=source,
+                        start_ts=start_ts, end_ts=end_ts, project=project,
+                        roles=roles):
                     order.append(cid)
                     dist[cid] = d
             except Exception as exc:
@@ -150,8 +191,8 @@ class Recall:
                 degraded = (f"fts-only: embeddings unavailable, semantic ranking is off — "
                             f"only literal word matches are returned ({type(exc).__name__}: {exc})")
         for cid in self.store.fts(
-                query, candidates, scope_root=root, source=source,
-                start_ts=start_ts, end_ts=end_ts, project=project):
+                query, pool, scope_root=root, source=source,
+                start_ts=start_ts, end_ts=end_ts, project=project, roles=roles):
             if cid not in dist:
                 order.append(cid)
                 dist[cid] = None  # keyword match, no vector distance
@@ -160,18 +201,32 @@ class Recall:
         # Collapse exact duplicates (same content across resumed sessions / sidechains) so
         # identical text never wastes two top-k slots. All rows stay in the DB (provenance);
         # we keep the highest-priority occurrence (KNN order, then FTS).
-        seen: set[str] = set()
+        kept_by_hash: dict[str, int] = {}
+        pieces_of: dict[tuple, int] = {}
         distinct: list[int] = []
         chunk_by_id = {}
         for cid in order:
             c = self.store.get_chunk(cid)
             if c is None:
                 continue  # deleted mid-search: costs its own slot, not the search
-            if c.content_hash in seen:
+            kept = kept_by_hash.get(c.content_hash)
+            if kept is not None:
+                # Same text in two places: when the caller wants what is
+                # current, the newer occurrence stands for both.
+                if recent and c.ts > chunk_by_id[kept].ts:
+                    chunk_by_id[cid] = c
+                    distinct[distinct.index(kept)] = cid
+                    kept_by_hash[c.content_hash] = cid
+                    del chunk_by_id[kept]
                 continue
-            seen.add(c.content_hash)
+            turn = (c.source, c.session_id, c.uuid)
+            if pieces_of.get(turn, 0) >= PIECES_PER_TURN:
+                continue
+            pieces_of[turn] = pieces_of.get(turn, 0) + 1
+            kept_by_hash[c.content_hash] = cid
             chunk_by_id[cid] = c
             distinct.append(cid)
+        distinct = distinct[:candidates * 2]
 
         # Rerank if a reranker is configured AND reachable. The reranker is OPTIONAL (some
         # embedding providers ship none) and may be down — either way we fall back to the
@@ -198,11 +253,37 @@ class Recall:
                 d = dist.get(cid)
                 scored.append((cid, round(1.0 / (1.0 + d), 4)
                                if isinstance(d, (int, float)) else None))
+        # A long turn is several sub-chunks; they compete as one hit, the
+        # best-ranked piece standing for the turn.
+        seen_turns: set[tuple] = set()
+        per_turn: list[tuple[int, float | None]] = []
+        for cid, score in scored:
+            c = chunk_by_id[cid]
+            key = (c.source, c.session_id, c.uuid)
+            if key in seen_turns:
+                continue
+            seen_turns.add(key)
+            per_turn.append((cid, score))
+        scored = per_turn
+        if recent:
+            # The bonus rides on a relevance score. Keyword-only hits have
+            # none (score None), so they keep their bm25 order after the
+            # scored ones: recency must break near-ties, never replace
+            # relevance — in a degraded, FTS-only search nothing moves.
+            def fused(item):
+                cid, score = item
+                ts = chunk_by_id[cid].ts
+                bonus = (RECENCY_WEIGHT * math.exp(-max(0, now - ts) / RECENCY_TAU_S)
+                         if ts else 0.0)
+                return score + bonus
+            with_score = [item for item in scored if item[1] is not None]
+            with_score.sort(key=fused, reverse=True)  # stable: ties keep rank order
+            scored = with_score + [item for item in scored if item[1] is None]
         picked = diversify(scored, k, per_session,
                            key=lambda item: (chunk_by_id[item[0]].source,
                                              chunk_by_id[item[0]].session_id))
         return SearchResult(
-            self._with_repos([self._anchor(chunk_by_id[cid], score, query)
+            self._with_repos([self._anchor(chunk_by_id[cid], score, query, now)
                               for cid, score in picked]),
             degraded)
 

@@ -14,6 +14,7 @@ import re
 from typing import Any, Iterator
 
 from .models import Chunk
+from .chunking import surface_pieces, surface_role
 from .scope import project_label
 
 
@@ -203,7 +204,7 @@ def discover_codex_transcripts(sessions_dir: Path, archived_dir: Path) -> list[T
 
 
 def extractor_version(source: str) -> str:
-    versions = {"claude": "2", "codex": "2", "cursor": "2"}
+    versions = {"claude": "3", "codex": "3", "cursor": "2"}
     try:
         return versions[source]
     except KeyError as exc:
@@ -595,8 +596,9 @@ def extract_codex_file(path: str, project: str = "") -> list[Chunk]:
                 "user_message", "agent_message"} or _completed_message(event.obj) is not None):
             if not event.content.strip():
                 continue
-            role = event.role
-            chunks.append(make_chunk(event, role, event.content))
+            role = surface_role(event.role, event.content)
+            for piece in surface_pieces(role, event.content):
+                chunks.append(make_chunk(event, role, piece))
     return chunks
 
 
