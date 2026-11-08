@@ -35,6 +35,9 @@ DEFAULT_ROLES = ("user", "assistant", "doc")
 
 MAX_CHARS = 2000
 OVERLAP = 200
+# split_text's overlap is OVERLAP minus at most one word, so a shared run
+# shorter than this is coincidence ("redis" + "disk cache"), not a seam.
+MIN_JOIN_OVERLAP = 32
 _BREAKS = ("\n\n", "\n", ". ", " ")
 _WS = re.compile(r"\s")
 
@@ -90,9 +93,11 @@ def split_text(text: str, max_chars: int = MAX_CHARS,
 
 def join_pieces(first: str, second: str, sep: str = "\n") -> str:
     """Concatenate two consecutive pieces of one turn without repeating the
-    overlap they share; falls back to a plain join when they share none."""
+    overlap they share. Only a seam-sized overlap counts: two separate text
+    blocks of one turn that happen to share a few characters are joined
+    whole, with `sep` between them."""
     limit = min(len(first), len(second), OVERLAP * 2)
-    for n in range(limit, 0, -1):
+    for n in range(limit, MIN_JOIN_OVERLAP - 1, -1):
         if first.endswith(second[:n]):
             return first + second[n:]
     return first + sep + second

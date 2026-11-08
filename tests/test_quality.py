@@ -516,3 +516,57 @@ def test_metadocs_collector_does_not_duplicate_overlap(tmp_path):
     merged = upd.turns[1]["text"]
     assert merged.endswith("FINAL_VERDICT") and merged.count("w0100") == 1
     assert "_full" not in upd.turns[1]
+
+
+# --- 8. review findings, third pass --------------------------------------------------
+
+def test_keyword_hit_cut_by_the_semantic_cap_still_reaches_the_pool(tmp_path):
+    """250 fillers sit nearer to the query vector than the one turn holding
+    the exact error string. The KNN pool keeps 200 of them and fetched the
+    needle too; the FTS path must still put the needle in the candidates."""
+    import session_recall.config as config
+    dim = config.EMBED_DIM
+    store = Store(tmp_path / "cap.db")
+    near = [0.0] * dim
+    near[0] = 1.0
+    far = [0.0] * dim
+    far[1] = 1.0
+    for i in range(250):
+        c = _doc(f"f{i}", f"Routine deploy note number {i}, all green.", T0 + i)
+        c.source, c.role, c.session_id = "claude", "assistant", "many"
+        store.add(c, near)
+    needle = _doc("needle", "Build failed: NEEDLE_EXACT_ERROR in the tokenizer step.", T0 + 400)
+    needle.source, needle.role, needle.session_id = "claude", "assistant", "many"
+    store.add(needle, far)
+    store.commit()
+
+    class NearQuery(FakeEmbedder):
+        def embed_query(self, text):
+            return near
+
+    recall = Recall(store, NearQuery(), FakeReranker())
+    hits = recall.recall_search("NEEDLE_EXACT_ERROR", k=5, per_session=0)
+    assert hits and hits[0].uuid == "needle"
+
+
+def test_join_pieces_does_not_merge_a_coincidental_short_match():
+    from session_recall.chunking import join_pieces
+    assert join_pieces("We use redis", "disk cache is disabled") == \
+        "We use redis\ndisk cache is disabled"
+
+
+def test_metadocs_collector_keeps_separate_text_blocks_apart(tmp_path):
+    from session_recall.metadocs import collect
+    from session_recall.metadocs.config import Watermarks
+    write_session(tmp_path / "projects", "blocks2", [
+        user("b", "u1", T0, "cache?"),
+        {"type": "assistant", "sessionId": "b", "uuid": "a1", "cwd": "/home/me/proj",
+         "gitBranch": "main", "timestamp": _iso(T0 + 1),
+         "message": {"role": "assistant", "content": [
+             {"type": "text", "text": "We use redis"},
+             {"type": "text", "text": "disk cache is disabled"}]}},
+    ])
+    store, _ = _build(tmp_path)
+    project = store.db.execute("SELECT project FROM chunks LIMIT 1").fetchone()[0]
+    (upd,) = collect.pending_sessions(store.db, project, Watermarks(tmp_path / "marks.json"))
+    assert upd.turns[1]["text"] == "We use redis\ndisk cache is disabled"

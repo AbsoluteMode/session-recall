@@ -232,7 +232,10 @@ class Recall:
         # symbol): they get their own per-turn cap and are never trimmed away
         # by the semantic pool.
         fts_ids = self._pool(fts, candidates, chunk_by_id, FTS_MAX)
-        order = knn_ids + [cid for cid in fts_ids if cid not in dist]
+        # Union against what the KNN pool KEPT, not what it fetched: an id the
+        # semantic cap threw away is still a valid keyword candidate.
+        kept_knn = set(knn_ids)
+        order = knn_ids + [cid for cid in fts_ids if cid not in kept_knn]
         if not order:
             return SearchResult([], degraded)
         # Collapse exact duplicates (same content across resumed sessions / sidechains) so
