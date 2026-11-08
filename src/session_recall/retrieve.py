@@ -93,6 +93,21 @@ def _match_snippet(text: str, pattern: str, n: int = 240) -> str:
     end = min(len(text), start + n)
     return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
 
+def _turn_key(c) -> tuple:
+    """What counts as one turn when sub-chunks compete for a hit.
+
+    A resumed Claude session copies its turns under a new sessionId with the
+    same event uuids (249 such turns in the 2026-11-08 index). Hash dedup can
+    keep piece A from one copy and piece B from the other, so a session-keyed
+    collapse showed the same answer twice. Claude uuids are UUID4, unique
+    across sessions, so there the turn is the uuid alone. Other sources keep
+    the session in the key: Codex uuids embed it anyway, and Cursor bubble ids
+    are only known to be unique within their composer."""
+    if c.source == "claude":
+        return (c.source, c.uuid)
+    return (c.source, c.session_id, c.uuid)
+
+
 class SearchResult(list):
     """Anchors plus how they were found. Subclasses list so every existing caller
     keeps indexing and iterating unchanged; `degraded` carries the health note that
@@ -151,16 +166,19 @@ class Recall:
             ids = fetch(n)
             chunk_by_id.update(self.store.get_chunks(
                 cid for cid in ids if cid not in chunk_by_id))
-            pieces: dict[tuple, int] = {}
+            pieces: dict[tuple, set[str]] = {}
             kept: list[int] = []
             for cid in ids:
                 c = chunk_by_id.get(cid)
                 if c is None:
                     continue  # deleted mid-search: costs its own slot, not the search
-                turn = (c.source, c.session_id, c.uuid)
-                if pieces.get(turn, 0) >= PIECES_PER_TURN:
+                turn = _turn_key(c)
+                seen = pieces.setdefault(turn, set())
+                if c.content_hash in seen:
+                    continue  # a resumed copy of a piece already in: not a new piece
+                if len(seen) >= PIECES_PER_TURN:
                     continue
-                pieces[turn] = pieces.get(turn, 0) + 1
+                seen.add(c.content_hash)
                 kept.append(cid)
                 if len(kept) >= 2 * want:
                     break
@@ -281,12 +299,13 @@ class Recall:
                 scored.append((cid, round(1.0 / (1.0 + d), 4)
                                if isinstance(d, (int, float)) else None))
         # A long turn is several sub-chunks; they compete as one hit, the
-        # best-ranked piece standing for the turn.
+        # best-ranked piece standing for the turn (see _turn_key for why a
+        # resumed copy of the turn is the same turn).
         seen_turns: set[tuple] = set()
         per_turn: list[tuple[int, float | None]] = []
         for cid, score in scored:
             c = chunk_by_id[cid]
-            key = (c.source, c.session_id, c.uuid)
+            key = _turn_key(c)
             if key in seen_turns:
                 continue
             seen_turns.add(key)

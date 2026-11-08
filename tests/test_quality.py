@@ -10,8 +10,10 @@ WHY: docs/decisions/2026-11-08-recall-noise-recency-subchunks.md
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
+from session_recall import config
 from session_recall.chunking import split_text, surface_role
 from session_recall.embed import FakeEmbedder
 from session_recall.extract import extract_file
@@ -98,9 +100,9 @@ def test_split_text_makes_progress_without_whitespace():
 def test_long_turn_becomes_several_chunks_sharing_the_uuid(tmp_path):
     long = "\n\n".join(f"Step {i}. " + "detail " * 60 for i in range(10))
     path = write_session(tmp_path / "projects", "long",
-                         [user("s", "u1", T0, "plan?"), assistant("s", "a1", T0 + 1, long)])
+                         [user("s", "s-u1", T0, "plan?"), assistant("s", "s-a1", T0 + 1, long)])
     chunks = extract_file(str(path), project="long")
-    parts = [c for c in chunks if c.uuid == "a1"]
+    parts = [c for c in chunks if c.uuid == "s-a1"]
     assert len(parts) > 1 and all(len(c.text) <= 2000 for c in parts)
     assert len({c.content_hash for c in parts}) == len(parts)
     assert all((c.byte_offset, c.byte_len, c.turn_index) == (parts[0].byte_offset,
@@ -111,12 +113,12 @@ def test_search_returns_a_long_turn_once(tmp_path):
     long = "\n\n".join(f"Step {i}. " + "detail " * 60 for i in range(10))
     long += "\n\nFinal step. The refresh token conflict came from the clock skew."
     write_session(tmp_path / "projects", "long",
-                  [user("s", "u1", T0, "plan?"), assistant("s", "a1", T0 + 1, long),
+                  [user("s", "s-u1", T0, "plan?"), assistant("s", "s-a1", T0 + 1, long),
                    assistant("s", "a2", T0 + 2, "Unrelated remark about lunch.")])
     _, recall = _build(tmp_path)
     hits = recall.recall_search("refresh token conflict clock skew", k=10, per_session=0)
     uuids = [h.uuid for h in hits]
-    assert uuids.count("a1") == 1, uuids
+    assert uuids.count("s-a1") == 1, uuids
     assert "clock skew" in hits[0].snippet  # the matching PART, not the opening
 
 
@@ -132,14 +134,14 @@ def test_surface_role_classifies_machinery():
 
 def test_claude_extraction_marks_summary_and_heartbeat(tmp_path):
     path = write_session(tmp_path / "projects", "roles", [
-        user("s", "u1", T0, SUMMARY),
+        user("s", "s-u1", T0, SUMMARY),
         user("s", "u2", T0 + 1, HEARTBEAT.format(iso="a")),
         assistant("s", "a2", T0 + 2, HEARTBEAT.format(iso="a") + "DONT_NOTIFY"),
         user("s", "u3", T0 + 3, "real question\n\n<side-sessions-event kind=\"done\">"
              "session x finished</side-sessions-event>"),
     ])
     chunks = {c.uuid: c for c in extract_file(str(path), project="roles")}
-    assert chunks["u1"].role == "summary"
+    assert chunks["s-u1"].role == "summary"
     assert chunks["u2"].role == chunks["a2"].role == "automation"
     assert chunks["u3"].role == "user" and chunks["u3"].text == "real question"
 
@@ -163,8 +165,8 @@ def test_codex_extraction_marks_heartbeats(tmp_path):
 
 def test_automation_rows_are_stored_without_vectors(tmp_path):
     write_session(tmp_path / "projects", "beat", [
-        user("b", "u1", T0, HEARTBEAT.format(iso="a")),
-        assistant("b", "a1", T0 + 1, HEARTBEAT.format(iso="a") + "x"),
+        user("b", "b-u1", T0, HEARTBEAT.format(iso="a")),
+        assistant("b", "b-a1", T0 + 1, HEARTBEAT.format(iso="a") + "x"),
     ])
     emb = FakeEmbedder()
     store, recall = _build(tmp_path, emb)
@@ -179,7 +181,7 @@ def test_automation_rows_are_stored_without_vectors(tmp_path):
 
 def test_summaries_rank_only_on_request(tmp_path):
     write_session(tmp_path / "projects", "sum", [
-        user("s", "u1", T0, SUMMARY),
+        user("s", "s-u1", T0, SUMMARY),
         user("s", "u2", T0 + 1, "how do we cache embeddings?"),
         assistant("s", "a2", T0 + 2, "We cache embeddings in sqlite."),
     ])
@@ -218,13 +220,13 @@ def test_asks_for_current_detects_temporal_wording():
 def _two_prs(tmp_path):
     q = "latest PR session recall merged squash green ci"
     write_session(tmp_path / "projects", "old", [
-        user("old", "u1", T0 - 100 * DAY, "status?"),
-        assistant("old", "a1", T0 - 100 * DAY + 1,
+        user("old", "old-u1", T0 - 100 * DAY, "status?"),
+        assistant("old", "old-a1", T0 - 100 * DAY + 1,
                   "latest PR session recall merged squash green ci twenty-two"),
     ])
     write_session(tmp_path / "projects", "new", [
-        user("new", "u1", T0 - 2 * DAY, "status?"),
-        assistant("new", "a1", T0 - 2 * DAY + 1,
+        user("new", "new-u1", T0 - 2 * DAY, "status?"),
+        assistant("new", "new-a1", T0 - 2 * DAY + 1,
                   "latest PR session recall merged squash green sixty-two today"),
     ])
     return q
@@ -253,12 +255,12 @@ def test_recent_first_forces_the_bonus_without_wording(tmp_path):
 
 def test_recency_never_lifts_an_irrelevant_hit(tmp_path):
     write_session(tmp_path / "projects", "old", [
-        user("old", "u1", T0 - 100 * DAY, "status?"),
-        assistant("old", "a1", T0 - 100 * DAY + 1, "latest PR merged squash"),
+        user("old", "old-u1", T0 - 100 * DAY, "status?"),
+        assistant("old", "old-a1", T0 - 100 * DAY + 1, "latest PR merged squash"),
     ])
     write_session(tmp_path / "projects", "new", [
-        user("new", "u1", T0 - 1 * DAY, "status?"),
-        assistant("new", "a1", T0 - 1 * DAY + 1,
+        user("new", "new-u1", T0 - 1 * DAY, "status?"),
+        assistant("new", "new-a1", T0 - 1 * DAY + 1,
                   "latest lunch was pasta and the weather stayed grey all afternoon"),
     ])
     _, recall = _build(tmp_path)
@@ -337,7 +339,7 @@ def test_extractor_bump_reuses_vectors_of_unchanged_text(tmp_path, monkeypatch):
 
 def test_multi_block_heartbeat_reply_is_one_automation_turn(tmp_path):
     path = write_session(tmp_path / "projects", "blocks", [
-        user("b", "u1", T0, "status?"),
+        user("b", "b-u1", T0, "status?"),
         {"type": "assistant", "sessionId": "b", "uuid": "a1", "cwd": "/home/me/proj",
          "gitBranch": "main", "timestamp": _iso(T0 + 1),
          "message": {"role": "assistant", "content": [
@@ -346,7 +348,7 @@ def test_multi_block_heartbeat_reply_is_one_automation_turn(tmp_path):
     ])
     roles = {(c.uuid, c.text[:11]): c.role for c in extract_file(str(path), project="blocks")}
     assert roles[("a1", "DONT_NOTIFY")] == "automation"
-    assert roles[("u1", "status?")] == "user"
+    assert roles[("b-u1", "status?")] == "user"
 
 
 def test_one_long_turn_cannot_crowd_out_another_match(tmp_path):
@@ -355,10 +357,10 @@ def test_one_long_turn_cannot_crowd_out_another_match(tmp_path):
     long = "\n\n".join(f"Note {i}: cache failure seen again in run {i} " + "filler " * 40
                        for i in range(150))
     write_session(tmp_path / "projects", "long", [
-        user("l", "u1", T0, "why?"), assistant("l", "a1", T0 + 1, long)])
+        user("l", "l-u1", T0, "why?"), assistant("l", "l-a1", T0 + 1, long)])
     write_session(tmp_path / "projects", "short", [
-        user("s", "u1", T0 + 10, "why?"),
-        assistant("s", "a1", T0 + 11, "The cache failure came from the tokenizer.")])
+        user("s", "s-u1", T0 + 10, "why?"),
+        assistant("s", "s-a1", T0 + 11, "The cache failure came from the tokenizer.")])
     _, recall = _build(tmp_path)
     hits = recall.recall_search("cache failure", k=10, per_session=0)
     assert {h.session_id for h in hits} == {"l", "s"}
@@ -368,12 +370,12 @@ def test_fts_only_search_keeps_lexical_order_under_recent_first(tmp_path):
     """Degraded (no embedder, no reranker): every hit has score None, so the
     recency bonus has nothing to ride on — bm25 order must stand."""
     write_session(tmp_path / "projects", "old", [
-        user("old", "u1", T0 - 100 * DAY, "?"),
-        assistant("old", "a1", T0 - 100 * DAY + 1,
+        user("old", "old-u1", T0 - 100 * DAY, "?"),
+        assistant("old", "old-a1", T0 - 100 * DAY + 1,
                   "cache cache cache tokens refresh failure")])
     write_session(tmp_path / "projects", "new", [
-        user("new", "u1", T0 - 1 * DAY, "?"),
-        assistant("new", "a1", T0 - 1 * DAY + 1, "latest pasta dish for lunch")])
+        user("new", "new-u1", T0 - 1 * DAY, "?"),
+        assistant("new", "new-a1", T0 - 1 * DAY + 1, "latest pasta dish for lunch")])
 
     class Broken(FakeEmbedder):
         def embed_query(self, text):
@@ -390,11 +392,11 @@ def test_fts_only_search_keeps_lexical_order_under_recent_first(tmp_path):
 def test_duplicate_text_surfaces_as_its_newest_occurrence_when_asked(tmp_path):
     text = "Release 62 merged successfully."
     write_session(tmp_path / "projects", "older", [
-        user("older", "u1", T0 - 100 * DAY, "?"),
-        assistant("older", "a1", T0 - 100 * DAY + 1, text)])
+        user("older", "older-u1", T0 - 100 * DAY, "?"),
+        assistant("older", "older-a1", T0 - 100 * DAY + 1, text)])
     write_session(tmp_path / "projects", "newer", [
-        user("newer", "u1", T0 - 1 * DAY, "?"),
-        assistant("newer", "a1", T0 - 1 * DAY + 1, text)])
+        user("newer", "newer-u1", T0 - 1 * DAY, "?"),
+        assistant("newer", "newer-a1", T0 - 1 * DAY + 1, text)])
     _, recall = _build(tmp_path)
     hits = recall.recall_search("Release 62 merged", k=5, recent_first=True, now=T0)
     merged = [h for h in hits if h.snippet == text]
@@ -449,10 +451,10 @@ def test_keyword_exact_match_survives_a_full_semantic_pool(tmp_path):
 def test_three_hundred_pieces_still_leave_room_for_another_turn(tmp_path):
     long = "\n\n".join(f"cache failure {i} " + "detail " * 275 for i in range(300))
     write_session(tmp_path / "projects", "long", [
-        user("l", "u1", T0, "why?"), assistant("l", "a1", T0 + 1, long)])
+        user("l", "l-u1", T0, "why?"), assistant("l", "l-a1", T0 + 1, long)])
     write_session(tmp_path / "projects", "short", [
-        user("s", "u1", T0 + 10, "why?"),
-        assistant("s", "a1", T0 + 11, "The cache failure came from the tokenizer.")])
+        user("s", "s-u1", T0 + 10, "why?"),
+        assistant("s", "s-a1", T0 + 11, "The cache failure came from the tokenizer.")])
     _, recall = _build(tmp_path)
     hits = recall.recall_search("cache failure", k=10, per_session=0)
     assert {h.session_id for h in hits} == {"l", "s"}
@@ -469,18 +471,18 @@ def test_large_candidates_argument_stays_within_sqlite_vec_limit(tmp_path):
 def test_duplicate_replacement_keeps_other_pieces_of_the_old_turn(tmp_path):
     shared = "Release 62 merged successfully."
     write_session(tmp_path / "projects", "older", [
-        user("older", "u1", T0 - 100 * DAY, "?"),
-        assistant("older", "a1", T0 - 100 * DAY + 1, shared),
+        user("older", "older-u1", T0 - 100 * DAY, "?"),
+        assistant("older", "older-a1", T0 - 100 * DAY + 1, shared),
         assistant("older", "a2", T0 - 100 * DAY + 2, "Release 62 notes: NEEDLE_EXACT_ERROR fixed."),
     ])
     write_session(tmp_path / "projects", "newer", [
-        user("newer", "u1", T0 - DAY, "?"), assistant("newer", "a1", T0 - DAY + 1, shared)])
+        user("newer", "newer-u1", T0 - DAY, "?"), assistant("newer", "newer-a1", T0 - DAY + 1, shared)])
     _, recall = _build(tmp_path)
     hits = recall.recall_search("Release 62 NEEDLE_EXACT_ERROR", k=10, per_session=0,
                                 recent_first=True, now=T0)
     uuids = {(h.session_id, h.uuid) for h in hits}
-    assert ("older", "a2") in uuids and ("newer", "a1") in uuids
-    assert ("older", "a1") not in uuids
+    assert ("older", "a2") in uuids and ("newer", "newer-a1") in uuids
+    assert ("older", "older-a1") not in uuids
 
 
 def test_sig_embed_fp_tolerates_colons_in_model_names():
@@ -559,7 +561,7 @@ def test_metadocs_collector_keeps_separate_text_blocks_apart(tmp_path):
     from session_recall.metadocs import collect
     from session_recall.metadocs.config import Watermarks
     write_session(tmp_path / "projects", "blocks2", [
-        user("b", "u1", T0, "cache?"),
+        user("b", "b-u1", T0, "cache?"),
         {"type": "assistant", "sessionId": "b", "uuid": "a1", "cwd": "/home/me/proj",
          "gitBranch": "main", "timestamp": _iso(T0 + 1),
          "message": {"role": "assistant", "content": [
@@ -570,3 +572,101 @@ def test_metadocs_collector_keeps_separate_text_blocks_apart(tmp_path):
     project = store.db.execute("SELECT project FROM chunks LIMIT 1").fetchone()[0]
     (upd,) = collect.pending_sessions(store.db, project, Watermarks(tmp_path / "marks.json"))
     assert upd.turns[1]["text"] == "We use redis\ndisk cache is disabled"
+
+
+# --- 9. resumed-session copies ------------------------------------------------------
+
+def _resumed_copies(tmp_path):
+    """One two-piece turn (uuid t1) present in the original session `orig` and
+    in its resume copy `res` — identical text, so identical hashes — whose
+    vectors were embedded at different times and drifted a little, as a GPU
+    embedder's do. By distance the pieces interleave: A(res), B(orig),
+    A(orig), B(res). Hash dedup then keeps A from one copy and B from the
+    other. Returns the Recall; the vectors are built around e0."""
+    store = Store(tmp_path / "copies.db")
+    dim = config.EMBED_DIM
+
+    def vec(eps):
+        v = [0.0] * dim
+        v[0], v[1] = 1.0, eps
+        norm = math.sqrt(1.0 + eps * eps)
+        return [x / norm for x in v]
+
+    class PinnedQuery(FakeEmbedder):
+        def embed_query(self, text):
+            return vec(0.0)
+
+    text_a = "Part A: the Codex bridge is an MCP link between the two agents."
+    text_b = "Part B: the Codex bridge relays questions over MCP both ways."
+    pieces = [("res", text_a, 0.1), ("orig", text_b, 0.2),
+              ("orig", text_a, 0.3), ("res", text_b, 0.4)]
+    for sid, text, eps in pieces:
+        store.add(Chunk(session_id=sid, uuid="t1", role="assistant", text=text,
+                        project="proj", cwd="/home/me/proj", git_branch="main",
+                        ts=T0, file_path=f"/t/{sid}.jsonl", byte_offset=0,
+                        byte_len=1, turn_index=1,
+                        content_hash=hashlib.sha256(text.encode()).hexdigest()),
+                  vec(eps))
+    store.commit()
+    return Recall(store, PinnedQuery(dim=dim), FakeReranker())
+
+
+def test_a_turn_copied_by_a_resumed_session_is_one_hit(tmp_path):
+    """249 Claude turns in the 2026-11-08 index live under two session_ids:
+    the original and the resume-created copy. When hash dedup keeps piece A
+    from one copy and piece B from the other, the per-turn collapse must still
+    see one turn — the uuid, not the session, is the turn's identity."""
+    recall = _resumed_copies(tmp_path)
+    hits = recall.recall_search("Codex bridge MCP", k=10, per_session=0)
+    assert [h.uuid for h in hits] == ["t1"], [(h.session_id, h.uuid) for h in hits]
+
+
+def _by_id(recall):
+    return lambda n: [r[0] for r in recall.store.db.execute(
+        "SELECT id FROM chunks ORDER BY id").fetchall()][:n]
+
+
+def test_turn_copies_share_one_candidate_cap(tmp_path):
+    """The per-turn candidate cap counts distinct pieces of the turn, whichever
+    copy of the session they come from: a resumed copy of a piece already in
+    the pool is not a new piece, so two copies of a long turn get neither twice
+    the pool nor a pool eaten by their own duplicates."""
+    recall = _resumed_copies(tmp_path)
+    chunks = {}
+    kept = recall._pool(_by_id(recall), 10, chunks, 100)
+    assert len(kept) == 2  # A and B once each, not 2 copies x 2 pieces
+    assert len({chunks[cid].content_hash for cid in kept}) == 2
+
+
+def test_every_distinct_piece_reaches_the_pool_despite_copies(tmp_path):
+    """Codex review 2026-11-08: with copies counted as pieces, the order
+    A(orig) A(res) B(orig) B(res) C(orig) C(res) filled the cap of 3 with
+    A, A, B and the reranker never saw C."""
+    store = Store(tmp_path / "three.db")
+    for i, text in enumerate(["piece A", "piece B", "piece C"]):
+        for sid in ("orig", "res"):
+            store.add(Chunk(session_id=sid, uuid="t1", role="assistant", text=text,
+                            project="p", cwd="/x", git_branch="main", ts=T0,
+                            file_path=f"/t/{sid}.jsonl", byte_offset=0, byte_len=1,
+                            turn_index=1, content_hash=f"h{i}"), None)
+    store.commit()
+    recall = Recall(store, FakeEmbedder(), FakeReranker())
+    chunks = {}
+    kept = recall._pool(_by_id(recall), 10, chunks, 100)
+    assert sorted(chunks[cid].content_hash for cid in kept) == ["h0", "h1", "h2"]
+
+
+def test_cursor_bubble_ids_are_turns_within_their_composer(tmp_path):
+    """Cursor bubble ids are only known to be unique inside one composer, so
+    two composers reusing an id are two turns, not a resumed copy."""
+    store = Store(tmp_path / "cursor.db")
+    emb = FakeEmbedder()
+    for sid, text in (("c1", "The Redis cache fix landed."), ("c2", "The disk cache fix landed.")):
+        store.add(Chunk(session_id=sid, uuid="b0", role="assistant", text=text,
+                        project="p", cwd="/x", git_branch="main", ts=T0,
+                        file_path=f"/c/{sid}", byte_offset=0, byte_len=1, turn_index=1,
+                        content_hash=hashlib.sha256(text.encode()).hexdigest(),
+                        source="cursor"), emb.embed_documents([text])[0])
+    store.commit()
+    hits = Recall(store, emb, FakeReranker()).recall_search("cache fix landed", k=10, per_session=0)
+    assert sorted(h.session_id for h in hits) == ["c1", "c2"]
