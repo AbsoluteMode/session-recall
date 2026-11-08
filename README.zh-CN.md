@@ -105,6 +105,14 @@ flowchart LR
 `started_by`（`user`、`agent` 或 `automation`，依据会话记录的元数据推断）以及 `active`
 （最近 10 分钟内有过轮次）。
 
+**什么会参与排名。** 自动化心跳（`<heartbeat>` 提示和回复）为状态看板保留，但从不嵌入、也从不
+参与排名。压缩会话的摘要（"This session is being continued…"）默认不进入 `recall_search`，
+除非传 `include_summaries=true`：其中的每个事实都同样存在于被摘要的轮次里，而它的关键词密度
+曾让摘要排在源头之上。长轮次按重叠的子块索引，并只返回一次——以最匹配的那一段呈现，所以一条
+20 KB 回答的结尾和开头一样可被找到。当查询问的是当前状态（"latest"、"now"、"最新"、"现在"…）
+或传了 `recent_first=true`，较新的轮次会在相关性之上获得一点时效加分；`score` 仍是纯相关性。
+超过 30 天的 meta docs 结果带有 `"stale": true`。
+
 <details>
 <summary><strong>查看一次完整调用</strong></summary>
 

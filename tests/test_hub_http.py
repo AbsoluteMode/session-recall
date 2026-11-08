@@ -172,6 +172,11 @@ def test_search_forwards_project_and_per_session(server, hub, monkeypatch):
     post(server, "/v1/search",
          {"query": "q", "project": "harmonia", "per_session": 0}, key=key)
     assert seen[-1]["project"] == "harmonia" and seen[-1]["per_session"] == 0
+    post(server, "/v1/search",
+          {"query": "q", "include_summaries": True, "recent_first": False}, key=key)
+    assert seen[-1]["include_summaries"] is True and seen[-1]["recent_first"] is False
+    post(server, "/v1/search", {"query": "q"}, key=key)
+    assert seen[-1]["include_summaries"] is False and seen[-1]["recent_first"] is None
 
 
 def test_search_without_a_query_is_a_bad_request(server, hub):

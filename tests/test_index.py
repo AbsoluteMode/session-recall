@@ -181,7 +181,9 @@ def test_legacy_sig_migrates_without_full_reembed(tmp_path):
     f = str(projects / "-Users-me-proj" / "session_a.jsonl")
     new_sig = store.db.execute(
         "SELECT sig FROM indexed_files WHERE path = ?", (f,)).fetchone()[0]
-    legacy = "v2:" + ":".join(new_sig.split(":")[-2:])  # v2:mtime:size
+    # v{N}:mtime:size for the CURRENT extractor: a pre-fingerprint sig from
+    # an older extractor must re-extract (vectors still reuse by hash).
+    legacy = new_sig.split(":")[0] + ":" + ":".join(new_sig.split(":")[-2:])
     store.db.execute("UPDATE indexed_files SET sig = ? WHERE path = ?", (legacy, f))
     store.commit()
     calls = emb.doc_calls

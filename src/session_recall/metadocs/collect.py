@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import PROJECT_ALL, PROJECT_GIT, Watermarks
+from ..chunking import join_pieces
 
 MAX_CALL_CHARS = 60_000    # per-CALL ceiling: chapter split for marathon sessions
 MAX_TURN_CHARS = 4_000     # one pasted log must not eat a whole chapter
@@ -93,12 +94,13 @@ def pending_sessions(db: sqlite3.Connection, project: str, marks: Watermarks,
     the window from above — `index-history` uses it to stop exactly where the
     daily memory begins, so the two never overlap."""
     rows = db.execute(
-        "SELECT source, session_id, role, text, ts FROM chunks "
+        "SELECT source, session_id, uuid, role, text, ts FROM chunks "
         "WHERE project = ? AND role IN ('user', 'assistant') "
-        "ORDER BY ts, turn_index", (project,)).fetchall()
+        "ORDER BY ts, turn_index, id", (project,)).fetchall()
 
     per: dict[str, SessionUpdate] = {}
-    for source, sid, role, text, ts in rows:
+    last_turn: tuple | None = None
+    for source, sid, uuid, role, text, ts in rows:
         if not text or not text.strip():
             continue
         ts = int(ts or 0)
@@ -108,8 +110,21 @@ def pending_sessions(db: sqlite3.Connection, project: str, marks: Watermarks,
             continue
         upd = per.setdefault(f"{source}:{sid}",
                              SessionUpdate(source=source, session_id=sid))
+        # A long turn is stored as several sub-chunks sharing its uuid. They
+        # are one turn here: a chapter boundary between two pieces would let
+        # the watermark advance past pieces that were never distilled.
+        key = (source, sid, uuid, role)
+        if key == last_turn and upd.turns:
+            whole = join_pieces(upd.turns[-1].pop("_full", upd.turns[-1]["text"]), text)
+            upd.turns[-1]["_full"] = whole
+            upd.turns[-1]["text"] = whole[:MAX_TURN_CHARS]
+            continue
+        last_turn = key
         upd.turns.append({"source": source, "session_id": sid, "role": role,
                           "text": text[:MAX_TURN_CHARS], "ts": ts})
+    for upd in per.values():
+        for turn in upd.turns:
+            turn.pop("_full", None)
     return sorted(per.values(), key=lambda u: u.turns[0]["ts"])
 
 

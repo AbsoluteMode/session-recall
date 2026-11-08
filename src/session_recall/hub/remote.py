@@ -65,11 +65,13 @@ class RemoteRecall:
     def recall_search(self, query: str, k: int = 10, scope_cwd: str | None = None,
                       source: str | None = None, start_ts: int | None = None,
                       end_ts: int | None = None, project: str | None = None,
-                      per_session: int = 2, **_ignored) -> SearchResult:
+                      per_session: int = 2, include_summaries: bool = False,
+                      recent_first: bool | None = None, **_ignored) -> SearchResult:
         body = self._post("/v1/search", {
             "query": query, "k": k, "scope_cwd": scope_cwd, "source": source,
             "start_ts": start_ts, "end_ts": end_ts, "project": project,
-            "per_session": per_session})
+            "per_session": per_session, "include_summaries": include_summaries,
+            "recent_first": recent_first})
         return SearchResult(self._anchors(body.get("anchors", [])),
                             body.get("degraded"))
 

@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 from collections.abc import Iterable
 from . import config
+from .chunking import embeddable
 from .extract import extract_file, extractor_tag
 from .store import Store
 from .embed import Embedder
@@ -78,6 +79,16 @@ def _scan_sessions(store: Store, path: str, source: str, sig: str,
 
 def _scan_sig(sig: str) -> str:
     return f"r{REPO_SCAN_VERSION}:{sig}"
+
+
+def _sig_embed_fp(sig: str) -> str:
+    """The embedding fingerprint a stored file signature was built in.
+    Format: <extractor tag>:<embed fp>:<stat parts>; a legacy pre-fingerprint
+    sig (3 parts) has none."""
+    parts = sig.split(":")[1:]           # drop the extractor tag
+    while parts and parts[-1].isdigit():  # drop the stat fields
+        parts.pop()
+    return ":".join(parts)               # a model alias may itself contain ':'
 
 
 def _forget_file(store: Store, path: str):
@@ -162,18 +173,20 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
                     _scan_sessions(store, str(jsonl), source, sig, resolver)
                     store.commit()
                 continue
-            # Reuse only vectors produced by the same source extractor version
-            # and embedding space. This makes live append-only updates cheap.
+            # Reuse vectors produced in the same embedding space. A vector is a
+            # function of the text and the embedder only: an extractor bump
+            # re-extracts the file but must not re-embed unchanged text, or an
+            # upgrade would resend the whole corpus. This also keeps live
+            # append-only updates cheap.
             stored = store.stored_sig(str(jsonl)) or ""
-            sig_prefix = f"{extractor_tag(source)}:{_embed_fp()}:"
-            same_space = stored.startswith(sig_prefix)
+            same_space = _sig_embed_fp(stored) == _embed_fp()
             cached = store.embeddings_by_hash(str(jsonl)) if same_space else {}
             # Codex moves completed rollouts from sessions/ to
             # archived_sessions/. Reuse the old path's vectors by stable thread
             # id so archiving does not resend the whole conversation.
             if source == "codex" and not stored and not cached:
                 cached = store.embeddings_by_session(
-                    meta.session_id, source="codex", sig_prefix=sig_prefix)
+                    meta.session_id, source="codex", embed_fp=_embed_fp())
             store.delete_file(str(jsonl))
             chunks = extract_file(str(jsonl), project=project, source=source)
             if chunks:
@@ -181,7 +194,7 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
                 # occurrence keeps its own provenance row.
                 missing: dict[str, str] = {}
                 for chunk in chunks:
-                    if chunk.content_hash not in cached:
+                    if embeddable(chunk.role) and chunk.content_hash not in cached:
                         missing.setdefault(chunk.content_hash, chunk.text)
                 new_texts = list(missing.values())
                 vecs = embedder.embed_documents(new_texts) if new_texts else []
@@ -190,6 +203,9 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
                         f"embedder returned {len(vecs)} vectors for {len(new_texts)} texts")
                 fresh = dict(zip(missing, vecs))
                 for chunk in chunks:
+                    if not embeddable(chunk.role):
+                        store.add(chunk, None)  # a row, not a vector
+                        continue
                     reused = cached.get(chunk.content_hash)
                     store.add(chunk, reused if reused is not None else fresh[chunk.content_hash])
             store.mark_indexed(str(jsonl), sig, source=source)
