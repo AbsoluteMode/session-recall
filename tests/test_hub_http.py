@@ -17,7 +17,7 @@ from session_recall.hub.masking import SecretMap
 from session_recall.models import Anchor
 
 GOOD = "claude/-Users-egor-proj/sess.jsonl"
-NETCUP = "Xk39dmPQ7wLz2vRt"
+SSH_PW = "Xk39dmPQ7wLz2vRt"
 
 
 class FakeRecall:
@@ -137,15 +137,15 @@ def test_gzipped_bodies_are_accepted(server, hub):
 def test_known_secrets_never_reach_the_disk(server, hub):
     """The masking map is live at ingest, so a credential in a transcript is
     replaced before the bytes are stored — not after someone notices."""
-    SecretMap.build({"servers/NETCUP_PASSWORD": NETCUP},
+    SecretMap.build({"infra/SSH_PASSWORD": SSH_PW},
                     salt="test-salt").save(hub.secrets_path)
     key = hub.keys.issue("egor")
-    line = json.dumps({"text": f"ssh with {NETCUP}"}).encode() + b"\n"
+    line = json.dumps({"text": f"ssh with {SSH_PW}"}).encode() + b"\n"
     _, body = upload(server, key, line)
 
     stored = storage.resolve(hub.transcripts, "egor", GOOD).read_bytes()
-    assert NETCUP.encode() not in stored
-    assert b"${servers/NETCUP_PASSWORD}" in stored
+    assert SSH_PW.encode() not in stored
+    assert b"${infra/SSH_PASSWORD}" in stored
     assert body["masked"] == 1
     # The manifest counts the CLIENT's bytes, so the next tail lines up even
     # though masking changed the stored length.
@@ -170,8 +170,8 @@ def test_search_forwards_project_and_per_session(server, hub, monkeypatch):
                         lambda self, q, **kw: seen.append(kw) or original(self, q, **kw))
     key = hub.keys.issue("egor")
     post(server, "/v1/search",
-         {"query": "q", "project": "harmonia", "per_session": 0}, key=key)
-    assert seen[-1]["project"] == "harmonia" and seen[-1]["per_session"] == 0
+         {"query": "q", "project": "payments", "per_session": 0}, key=key)
+    assert seen[-1]["project"] == "payments" and seen[-1]["per_session"] == 0
     post(server, "/v1/search",
           {"query": "q", "include_summaries": True, "recent_first": False}, key=key)
     assert seen[-1]["include_summaries"] is True and seen[-1]["recent_first"] is False

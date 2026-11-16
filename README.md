@@ -102,7 +102,7 @@ became search chunks. On-demand only: no proactive context injection into every 
 launched in; its `repos` are what that session actually worked on. Every path its tool calls
 name (an edit, a `cd`, a Codex `workdir`) is resolved to the owning git repo — worktrees and
 symlinked aliases collapse to one checkout — and a repo other than the launch folder needs at
-least three calls to count. Pass `project="harmonia"` to any discovery tool to get the
+least three calls to count. Pass `project="payments"` to any discovery tool to get the
 sessions that worked on that repo wherever they ran; `scope_cwd` includes them too.
 `recall_search` keeps at most two hits per session (`per_session`, `0` = off) so one long
 session cannot fill the page, and cuts each snippet around the passage that matches the
@@ -163,7 +163,7 @@ indexed 2175 chunks from changed transcripts
 
 your history: 1053 sessions spanning 168 days, 40,037 searchable fragments
   Claude Code 372 · Codex 680 · Cursor 1
-  busiest: sidekey, trend_detection, glitch
+  busiest: api, web, worker
 ```
 
 Hosted Voyage embeddings rank noticeably better than the bundled model; to use them, export

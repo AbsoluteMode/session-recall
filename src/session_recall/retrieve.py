@@ -235,7 +235,7 @@ class Recall:
                     return [cid for cid, _ in rows]
                 knn_ids = self._pool(knn, candidates, chunk_by_id, KNN_MAX)
             except Exception as exc:
-                # WHY: docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md
+                # WHY: docs/decisions/2026-07-26-voyage-403-egress-and-degraded-flag.md
                 # Embedding unavailable -> FTS-only. Never hard-fail: keyword hits still
                 # beat nothing. But say so — a silent fallback looks identical to a
                 # healthy search that found little, and the caller stops trusting recall

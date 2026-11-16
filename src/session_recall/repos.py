@@ -3,8 +3,8 @@
 `chunks.project` is the folder the session was LAUNCHED in. That is often not
 the project: a session opened in one repo's worktree edits another repo by
 absolute path, a desktop scratch folder works on a real repo, a symlinked
-alias (`~/exodia -> whytap`) splits one repo into two names. A question like
-"what happened in harmonia" then misses the sessions that did the work.
+alias (`~/legacy-app -> main-app`) splits one repo into two names. A question like
+"what happened in payments" then misses the sessions that did the work.
 
 The evidence is already in every transcript: the tool calls. Every path a
 call names — an Edit's file_path, a `cd`, a `git -C`, a Codex workdir — is

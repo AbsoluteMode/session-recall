@@ -42,7 +42,7 @@ from pathlib import Path
 # session ids, project directories and date parts, none of which need more.
 # The first character cannot be a dot, which rules out `..` and hidden files.
 # A LEADING DASH IS ALLOWED and must stay allowed: Claude Code names its
-# project directories after the encoded cwd (`-Users-egor-proj`), so rejecting
+# project directories after the encoded cwd (`-Users-alice-proj`), so rejecting
 # them would reject every Claude transcript there is. Nothing here reaches a
 # shell or an argv, so a flag-shaped name is inert.
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")

@@ -30,10 +30,10 @@ T0 = 1792900000  # 2026-10-25
 DAY = 86400
 HEARTBEAT = ("<heartbeat>\n  <automation_id>w</automation_id>\n"
              "  <current_time_iso>{iso}</current_time_iso>\n"
-             "  <instructions>Ты — сборщик очереди Whytap.</instructions>\n</heartbeat>")
+             "  <instructions>Ты — сборщик очереди MainApp.</instructions>\n</heartbeat>")
 SUMMARY = ("This session is being continued from a previous conversation that ran "
            "out of context. The summary below covers the earlier part.\n\nSummary:\n"
-           "1. Primary Request: fix the whytap build queue; tokens cache embeddings\n")
+           "1. Primary Request: fix the main-app build queue; tokens cache embeddings\n")
 
 
 def _iso(ts):
@@ -174,7 +174,7 @@ def test_automation_rows_are_stored_without_vectors(tmp_path):
     assert store.db.execute("SELECT count(*) FROM chunks").fetchone()[0] == 2
     assert store.db.execute("SELECT count(*) FROM vec_chunks").fetchone()[0] == 0
     assert store.fts("automation_id", 5), "still greppable through fts"
-    assert recall.recall_search("Whytap очередь сборщик", k=5) == []
+    assert recall.recall_search("MainApp очередь сборщик", k=5) == []
     # and the session still exists for the status board
     assert recall.recent_sessions(now=T0 + 5)[0]["session_id"] == "b"
 

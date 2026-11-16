@@ -15,7 +15,7 @@ from session_recall.hub.client import (CONSENT, HubConfig, HubError, join,
 from session_recall.hub.masking import SecretMap
 
 ANTHROPIC = "sk-ant-api03-" + "B" * 40
-NETCUP = "Xk39dmPQ7wLz2vRt"
+SSH_PW = "Xk39dmPQ7wLz2vRt"
 
 
 @pytest.fixture
@@ -147,17 +147,17 @@ def test_hub_side_masking_still_applies_to_what_the_client_missed(
         cfg, hub, roots):
     """A password has no format, so the client cannot catch it; the Doppler
     map on the hub is what stops it."""
-    SecretMap.build({"servers/NETCUP_PASSWORD": NETCUP},
+    SecretMap.build({"infra/SSH_PASSWORD": SSH_PW},
                     salt="test-salt").save(hub.secrets_path)
     leaky = roots["claude_root"] / "-Users-egor-proj" / "sess-a.jsonl"
-    leaky.write_text(json.dumps({"text": f"sshpass -p {NETCUP}"}) + "\n")
+    leaky.write_text(json.dumps({"text": f"sshpass -p {SSH_PW}"}) + "\n")
 
     stats = push(cfg, roots=roots)
     stored = storage.resolve(hub.transcripts, "egor",
                              "claude/-Users-egor-proj/sess-a.jsonl").read_text()
     assert stats["redacted"] == 0                     # the client saw nothing
-    assert NETCUP not in stored
-    assert "${servers/NETCUP_PASSWORD}" in stored
+    assert SSH_PW not in stored
+    assert "${infra/SSH_PASSWORD}" in stored
 
 
 def test_unsupported_names_are_skipped_not_fatal(cfg, hub, roots):

@@ -178,29 +178,29 @@
     {
       "path": "docs/decisions/2026-06-27-grep-resilient-to-deleted-transcripts.md",
       "rule": "personal-path",
-      "literal": "~/.claude/projects/-Users-maxim/",
+      "literal": "~/.claude/projects/-Users-dev/",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
     {
       "path": "docs/decisions/2026-06-27-recall-ergonomics-when-and-recent-sessions.md",
       "rule": "personal-path",
-      "literal": "~/sidekey)",
+      "literal": "~/my-app)",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
     {
-      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-and-degraded-flag.md",
       "rule": "personal-path",
       "literal": "~/.local/bin/session-recall{,-mcp}",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
     {
-      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-and-degraded-flag.md",
       "rule": "personal-path",
       "literal": "~/.claude/settings.json",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."
     },
     {
-      "path": "docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md",
+      "path": "docs/decisions/2026-07-26-voyage-403-egress-and-degraded-flag.md",
       "rule": "personal-path",
       "literal": "~/.zshenv",
       "reason": "Documented example of a standard runtime path, with no personal username or credential."

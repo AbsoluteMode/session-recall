@@ -51,8 +51,8 @@ small).
 - `test_recall_search_enriches_with_human_timestamp` + delegation/scope test for the
   new tool at the server layer.
 - Full suite: 64 passed, 0 regressions.
-- Live index: `recent_sessions(scope_cwd=~/sidekey)` returned the three freshest
-  sidekey sessions with readable "Nm ago" times, turn counts, and prompt labels.
+- Live index: `recent_sessions(scope_cwd=~/my-app)` returned the three freshest
+  project sessions with readable "Nm ago" times, turn counts, and prompt labels.
 
 ## Rejected
 

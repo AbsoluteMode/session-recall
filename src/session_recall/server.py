@@ -93,7 +93,7 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     current project/repo (worktrees collapse to the repo root; sessions that
     worked on the repo from another folder are included). Omit it for a
     global, cross-project search.
-    project: a repo/project name (e.g. "harmonia"). Matches sessions that
+    project: a repo/project name (e.g. "payments"). Matches sessions that
     actually worked on that repo — by their tool calls, wherever they were
     launched — plus sessions launched in a folder of that name.
     per_session: at most this many hits per session before other sessions get
@@ -145,7 +145,7 @@ def grep(pattern: str, session_id: str | None = None, scope_cwd: str | None = No
 
     scope_cwd: pass your current working directory to restrict the scan to the
     current project/repo; omit for a global scan.
-    project: a repo/project name (e.g. "harmonia"). Matches sessions that
+    project: a repo/project name (e.g. "payments"). Matches sessions that
     actually worked on that repo — by their tool calls, wherever they were
     launched — plus sessions launched in a folder of that name.
     source: optionally restrict to "claude", "codex", "cursor", or "antigravity".
@@ -176,7 +176,7 @@ def recent_sessions(scope_cwd: str | None = None, limit: int = 10,
 
     scope_cwd: pass your current working directory to restrict to the current
     project/repo (worktrees collapse to the repo root); omit for all projects.
-    project: a repo/project name (e.g. "harmonia"). Matches sessions that
+    project: a repo/project name (e.g. "payments"). Matches sessions that
     actually worked on that repo — by their tool calls, wherever they were
     launched — plus sessions launched in a folder of that name.
     source: optionally restrict to "claude", "codex", "cursor", or "antigravity".

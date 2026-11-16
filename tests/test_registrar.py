@@ -57,17 +57,17 @@ def home(tmp_path):
     symlinked alias, a plugin cache that is itself a git clone, and a folder
     that is not a repo at all."""
     h = tmp_path / "home"
-    for repo in ("food", "harmonia", "whytap", "neighbour"):
+    for repo in ("food", "payments", "main-app", "neighbour"):
         (h / repo / ".git").mkdir(parents=True)
     wt = h / "food" / ".claude" / "worktrees" / "wt"
     wt.mkdir(parents=True)
     (wt / ".git").write_text(f"gitdir: {h / 'food' / '.git' / 'worktrees' / 'wt'}\n")
-    os.symlink(h / "whytap", h / "exodia")
+    os.symlink(h / "main-app", h / "legacy-app")
     (h / ".claude" / "plugins" / "cache" / "tool" / ".git").mkdir(parents=True)
     (h / "notes").mkdir()
-    cx = h / ".codex" / "worktrees" / "1a2b" / "whytap"
+    cx = h / ".codex" / "worktrees" / "1a2b" / "main-app"
     cx.mkdir(parents=True)
-    (cx / ".git").write_text(f"gitdir: {h / 'whytap' / '.git' / 'worktrees' / '1a2b'}\n")
+    (cx / ".git").write_text(f"gitdir: {h / 'main-app' / '.git' / 'worktrees' / '1a2b'}\n")
     return h
 
 
@@ -83,16 +83,16 @@ def _recall(store):
 
 
 def _cross_repo_session(home, sid="cross", ts=T0):
-    """Launched in food's worktree, all real work done in ~/harmonia."""
+    """Launched in food's worktree, all real work done in ~/payments."""
     wt = str(home / "food" / ".claude" / "worktrees" / "wt")
-    hm = home / "harmonia"
+    hm = home / "payments"
     edits = [("Edit", {"file_path": str(hm / "src" / f"f{i}.ts")}) for i in range(4)]
     return [
         user(sid, f"{sid}-u1", wt, ts, "сделай память двух уровней для оркестратора"),
         assistant(sid, f"{sid}-a1", wt, ts + 10, "Берусь за память оркестратора.",
                   tools=edits + [("Bash", {"command": f"cd {hm} && npm test"})]),
         assistant(sid, f"{sid}-a2", wt, ts + 20,
-                  "Готово: память двух уровней в оркестраторе harmonia работает."),
+                  "Готово: память двух уровней в оркестраторе payments работает."),
     ]
 
 
@@ -102,8 +102,8 @@ def test_session_is_attributed_to_the_repo_it_edited_not_its_launch_folder(tmp_p
     write_session(tmp_path / "projects", "cross", _cross_repo_session(home))
     store = _index(tmp_path, home)
     repos = store.session_repos([("claude", "cross")])[("claude", "cross")]
-    assert [r["repo"] for r in repos] == ["harmonia", "food"]
-    assert repos[0]["path"] == os.path.realpath(home / "harmonia")
+    assert [r["repo"] for r in repos] == ["payments", "food"]
+    assert repos[0]["path"] == os.path.realpath(home / "payments")
     assert repos[0]["touches"] == 5  # four Edits + one cd, each call counted once
 
 
@@ -111,42 +111,42 @@ def test_project_filter_finds_cross_repo_work_in_every_tool(tmp_path, home):
     write_session(tmp_path / "projects", "cross", _cross_repo_session(home))
     recall = _recall(_index(tmp_path, home))
 
-    hits = recall.recall_search("память оркестратора", project="harmonia")
+    hits = recall.recall_search("память оркестратора", project="payments")
     assert hits and {h.session_id for h in hits} == {"cross"}
     assert hits[0].project == "food"           # where it was launched
-    assert hits[0].repos == ["harmonia", "food"]  # what it worked on
+    assert hits[0].repos == ["payments", "food"]  # what it worked on
 
     assert recall.recall_search("память оркестратора", project="neighbour") == []
-    assert recall.grep("двух уровней", project="harmonia")
+    assert recall.grep("двух уровней", project="payments")
     assert recall.grep("двух уровней", project="neighbour") == []
-    recent = recall.recent_sessions(project="HARMONIA", now=T0 + 30)  # case-insensitive
+    recent = recall.recent_sessions(project="PAYMENTS", now=T0 + 30)  # case-insensitive
     assert [s["session_id"] for s in recent] == ["cross"]
 
 
 def test_scope_cwd_of_the_edited_repo_includes_work_done_from_elsewhere(tmp_path, home):
-    """The live failure: scope_cwd=~/harmonia returned only unrelated hits,
+    """The live failure: scope_cwd=~/payments returned only unrelated hits,
     because the work happened in a session launched elsewhere."""
     write_session(tmp_path / "projects", "cross", _cross_repo_session(home))
     recall = _recall(_index(tmp_path, home))
-    scoped = recall.recall_search("память оркестратора", scope_cwd=str(home / "harmonia"))
+    scoped = recall.recall_search("память оркестратора", scope_cwd=str(home / "payments"))
     assert {h.session_id for h in scoped} == {"cross"}
-    assert recall.grep("двух уровней", scope_cwd=str(home / "harmonia" / "src"))
+    assert recall.grep("двух уровней", scope_cwd=str(home / "payments" / "src"))
     # The old cwd scope still works too.
     assert recall.recall_search("память оркестратора", scope_cwd=str(home / "food"))
 
 
 def test_symlinked_alias_is_one_repo(tmp_path, home):
-    alias = str(home / "exodia")
+    alias = str(home / "legacy-app")
     write_session(tmp_path / "projects", "alias", [
         user("alias", "al-u", alias, T0, "добавь Meeting Assistant"),
         assistant("alias", "al-a", alias, T0 + 5, "Meeting Assistant подключён.",
                   tools=[("Bash", {"command": "swift build"})]),
     ])
     recall = _recall(_index(tmp_path, home))
-    assert recall.recall_search("Meeting Assistant", project="whytap")[0].repos == ["whytap"]
+    assert recall.recall_search("Meeting Assistant", project="main-app")[0].repos == ["main-app"]
     # The launch-folder name keeps working for anyone who knows it by that name.
-    assert recall.recall_search("Meeting Assistant", project="exodia")
-    assert recall.recall_search("Meeting Assistant", scope_cwd=str(home / "whytap"))
+    assert recall.recall_search("Meeting Assistant", project="legacy-app")
+    assert recall.recall_search("Meeting Assistant", scope_cwd=str(home / "main-app"))
 
 
 def test_a_glance_or_a_plugin_cache_is_not_work_on_a_repo(tmp_path, home):
@@ -168,18 +168,18 @@ def test_urls_and_odd_paths_never_hang_or_attribute(home):
     """Live hang: "https://github.com/x" yields "//github.com/x", and POSIX
     dirname("//") == "//" — the walk to the root never ended."""
     resolver = RepoResolver(home=str(home))
-    for odd in ("//github.com/AbsoluteMode/harmonia", "//", "/", "~", "relative/x",
+    for odd in ("//github.com/example/payments", "//", "/", "~", "relative/x",
                 "", "/nonexistent/deep/path/file.py"):
         assert resolver.repo_of(odd) is None
     from session_recall.repos import owning_repo
     assert owning_repo("//github.com/x") == os.path.realpath("//github.com/x")
-    assert owning_repo(str(home / "harmonia" / "src")) == os.path.realpath(home / "harmonia")
+    assert owning_repo(str(home / "payments" / "src")) == os.path.realpath(home / "payments")
 
 
 def test_codex_worktree_in_a_hidden_folder_belongs_to_its_main_checkout(tmp_path, home):
     """Live gap: Codex keeps worktrees under ~/.codex/worktrees/<id>/<repo>;
-    44 whytap sessions had no attribution while hidden folders were skipped."""
-    cwd = str(home / ".codex" / "worktrees" / "1a2b" / "whytap")
+    44 main-app sessions had no attribution while hidden folders were skipped."""
+    cwd = str(home / ".codex" / "worktrees" / "1a2b" / "main-app")
     write_session(tmp_path / "projects", "cxwt", [
         user("cxwt", "cw-u", cwd, T0, "почини таймер"),
         assistant("cxwt", "cw-a", cwd, T0 + 1, "починил",
@@ -187,11 +187,11 @@ def test_codex_worktree_in_a_hidden_folder_belongs_to_its_main_checkout(tmp_path
     ])
     store = _index(tmp_path, home)
     assert [r["repo"] for r in store.session_repos(
-        [("claude", "cxwt")])[("claude", "cxwt")]] == ["whytap"]
+        [("claude", "cxwt")])[("claude", "cxwt")]] == ["main-app"]
 
 
 def test_deleted_codex_worktree_falls_back_to_the_same_named_checkout(tmp_path, home):
-    gone = str(home / ".codex" / "worktrees" / "9z9z" / "exodia")  # alias, deleted
+    gone = str(home / ".codex" / "worktrees" / "9z9z" / "legacy-app")  # alias, deleted
     stray = str(home / ".codex" / "worktrees" / "8y8y" / "no-such-repo")
     write_session(tmp_path / "projects", "gonecx", [
         user("gonecx", "gc-u", gone, T0, "бэкап конфигов"),
@@ -201,7 +201,7 @@ def test_deleted_codex_worktree_falls_back_to_the_same_named_checkout(tmp_path, 
     ])
     store = _index(tmp_path, home)
     assert [r["repo"] for r in store.session_repos(
-        [("claude", "gonecx")])[("claude", "gonecx")]] == ["whytap"]
+        [("claude", "gonecx")])[("claude", "gonecx")]] == ["main-app"]
 
 
 def test_deleted_worktree_and_non_repo_folder_still_attribute(tmp_path, home):
@@ -226,27 +226,27 @@ def test_deleted_worktree_and_non_repo_folder_still_attribute(tmp_path, home):
 
 def test_a_scratch_session_in_hidden_or_library_folder_has_only_real_repos(tmp_path, home):
     scratch = str(home / "Library" / "Application Support" / "Claude" / "scratch-1")
-    hm = str(home / "harmonia")
+    hm = str(home / "payments")
     write_session(tmp_path / "projects", "scratch", [
-        user("scratch", "sc-u", scratch, T0, "вспомни harmonia"),
+        user("scratch", "sc-u", scratch, T0, "вспомни payments"),
         assistant("scratch", "sc-a", scratch, T0 + 1, "вспомнил",
                   tools=[("Bash", {"command": f"git -C {hm} log"})] * 3),
     ])
     store = _index(tmp_path, home)
     assert [r["repo"] for r in store.session_repos(
-        [("claude", "scratch")])[("claude", "scratch")]] == ["harmonia"]
+        [("claude", "scratch")])[("claude", "scratch")]] == ["payments"]
 
 
 def test_codex_workdir_and_exec_code_paths_are_attributed(tmp_path, home):
     codex_root = tmp_path / "codex"
     path = codex_root / "2026" / "10" / "25" / "rollout-x-01a1.jsonl"
     path.parent.mkdir(parents=True)
-    hm, food = str(home / "harmonia"), str(home / "food")
+    hm, food = str(home / "payments"), str(home / "food")
     rows = [
         {"timestamp": _iso(T0), "type": "session_meta", "payload": {
             "id": "01a1", "cwd": food, "originator": "Claude Code", "source": "vscode"}},
         {"timestamp": _iso(T0 + 1), "type": "event_msg", "payload": {
-            "type": "user_message", "message": "почини тесты harmonia"}},
+            "type": "user_message", "message": "почини тесты payments"}},
     ] + [
         {"timestamp": _iso(T0 + 2 + i), "type": "response_item", "payload": {
             "type": "function_call", "name": "exec_command", "call_id": f"c{i}",
@@ -257,14 +257,14 @@ def test_codex_workdir_and_exec_code_paths_are_attributed(tmp_path, home):
             "type": "custom_tool_call", "name": "exec", "call_id": "c9",
             "input": f'await tools.exec_command({{cmd:"cat {hm}/package.json"}})'}},
         {"timestamp": _iso(T0 + 6), "type": "event_msg", "payload": {
-            "type": "agent_message", "message": "Тесты harmonia зелёные."}},
+            "type": "agent_message", "message": "Тесты payments зелёные."}},
     ]
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     store = Store(tmp_path / "r.db")
     index_corpus(store, FakeEmbedder(), None, (codex_root,),
                  resolver=RepoResolver(home=str(home)))
     recent = _recall(store).recent_sessions(now=T0 + 60)
-    assert recent[0]["repos"][0] == {"repo": "harmonia", "path": hm, "touches": 3}
+    assert recent[0]["repos"][0] == {"repo": "payments", "path": hm, "touches": 3}
     assert recent[0]["started_by"] == "agent"  # a Codex thread Claude opened
     assert recent[0]["source"] == "codex"
 
@@ -293,7 +293,7 @@ def test_an_existing_index_is_backfilled_without_re_embedding(tmp_path, home):
     index_corpus(store, embedder, tmp_path / "projects",
                  resolver=RepoResolver(home=str(home)))
     assert embedder.documents == embedded
-    assert store.session_repos([("claude", "cross")])[("claude", "cross")][0]["repo"] == "harmonia"
+    assert store.session_repos([("claude", "cross")])[("claude", "cross")][0]["repo"] == "payments"
     # A further run with nothing new does no work at all.
     index_corpus(store, embedder, tmp_path / "projects",
                  resolver=RepoResolver(home=str(home)))
@@ -312,7 +312,7 @@ def test_growing_and_deleted_transcripts_keep_facts_in_step(tmp_path, home):
     index_corpus(store, FakeEmbedder(), tmp_path / "projects",
                  resolver=RepoResolver(home=str(home)))
     repos = store.session_repos([("claude", "cross")])[("claude", "cross")]
-    assert [r["repo"] for r in repos] == ["harmonia", "neighbour", "food"]
+    assert [r["repo"] for r in repos] == ["payments", "neighbour", "food"]
     assert store.db.execute("SELECT COUNT(*) FROM session_info").fetchone()[0] == 1
 
     path.unlink()
@@ -329,7 +329,7 @@ def test_recent_sessions_reads_like_a_status_board(tmp_path, home):
     write_session(tmp_path / "projects", "side", [
         user("side", "sd-u1", food, T0,
              "<system-reminder>worktree</system-reminder>"
-             "Background (from the session that started this one):\nМаксим строит центр.\n\n"
+             "Background (from the session that started this one):\nРазрабатываем оркестратор.\n\n"
              "Task:\nДоработай recall для регистратора", branch="claude/side"),
         assistant("side", "sd-a1", food, T0 + 5, "Начинаю с аудита.", branch="claude/side"),
         user("side", "sd-u2", food, T0 + 50,
@@ -466,10 +466,10 @@ def test_human_ask_edges():
 def test_mcp_tools_forward_project_and_drop_empty_repos(tmp_path, home, monkeypatch):
     write_session(tmp_path / "projects", "cross", _cross_repo_session(home))
     monkeypatch.setattr(server, "_recall", _recall(_index(tmp_path, home)))
-    anchors = server.recall_search("память оркестратора", project="harmonia")["anchors"]
-    assert anchors and anchors[0]["repos"] == ["harmonia", "food"]
-    assert server.grep("двух уровней", project="harmonia")
-    assert server.recent_sessions(project="harmonia")[0]["session_id"] == "cross"
+    anchors = server.recall_search("память оркестратора", project="payments")["anchors"]
+    assert anchors and anchors[0]["repos"] == ["payments", "food"]
+    assert server.grep("двух уровней", project="payments")
+    assert server.recent_sessions(project="payments")[0]["session_id"] == "cross"
     from session_recall.models import Anchor
     bare = server._adict(Anchor(session_id="s", uuid="u", role="doc", snippet="",
                                 score=None, project="p", when=0, source="metadocs"))
@@ -482,8 +482,8 @@ def test_hub_client_sends_project_to_the_server(monkeypatch):
     sent = []
     remote = RemoteRecall(HubConfig(url="http://hub", key="k"))
     monkeypatch.setattr(remote, "_post", lambda path, body: sent.append((path, body)) or {})
-    remote.recall_search("q", project="harmonia", per_session=0)
-    remote.grep("p", project="harmonia")
-    remote.recent_sessions(project="harmonia")
-    assert [b["project"] for _, b in sent] == ["harmonia"] * 3
+    remote.recall_search("q", project="payments", per_session=0)
+    remote.grep("p", project="payments")
+    remote.recent_sessions(project="payments")
+    assert [b["project"] for _, b in sent] == ["payments"] * 3
     assert sent[0][1]["per_session"] == 0

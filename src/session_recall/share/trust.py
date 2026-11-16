@@ -7,7 +7,7 @@ peer or widen scope (gate §2: tokens are made by people).
 Three things live per peer, and each answers a different question:
 
 - **petname** — what *we* call them. The name a peer picks for itself is their
-  text and can say anything, including "egor"; the petname is ours, unique, and
+  text and can say anything, including "alice"; the petname is ours, unique, and
   it is what every prompt and preview refers to. Impersonation by naming stops
   being possible.
 - **local_address** — the inbox *we* minted for this one peer during pairing.
@@ -15,7 +15,7 @@ Three things live per peer, and each answers a different question:
   the same person, and revoking a peer stops us listening on that address at all
   rather than merely flagging their envelopes.
 - **projects** — what this peer may see. Scope is per contact because what one
-  colleague should know is not what another should: `share allow X --to egor`.
+  colleague should know is not what another should: `share allow X --to alice`.
   The `--to all` bucket exists for projects that are genuinely open to every
   contact, and it is spelled out loud rather than being the silent default.
 

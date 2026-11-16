@@ -16,7 +16,7 @@
 - **Ключи и токены вырезаются автоматически**, в два слоя: на твоей машине
   режутся значения известных форматов (`sk-ant-…`, `ghp_…`, PEM-блоки), а на
   сервере дополнительно маскируется всё, что команда хранит в Doppler —
-  например пароль от сервера заменится на `${servers/NETCUP_PASSWORD}`.
+  например пароль от сервера заменится на `${infra/SSH_PASSWORD}`.
 - **Это растяжка, а не гарантия.** Пароль, придуманный на ходу и никуда не
   записанный, не поймает ни один из слоёв. Личное в рабочие сессии писать не
   стоит — как и раньше.
@@ -45,7 +45,7 @@ pipx install git+https://github.com/AbsoluteMode/session-recall
 по нему видно, чьи сессии приходят.
 
 ```bash
-session-recall hub join https://recall.terra-sandbox.ru sr_твоёимя_…
+session-recall hub join https://recall.example.com sr_твоёимя_…
 ```
 
 Команда покажет, что именно будет отправляться, и спросит подтверждение.
@@ -121,7 +121,7 @@ session-recall hub leave
 На сервере:
 
 ```bash
-session-recall hub key issue egor --note "ноутбук Егора"
+session-recall hub key issue alice --note "рабочий ноутбук"
 ```
 
 Ключ печатается **один раз** — восстановить его нельзя, только выпустить
@@ -139,7 +139,7 @@ session-recall hub key list
 ### Отозвать доступ
 
 ```bash
-session-recall hub key revoke egor      # все устройства сотрудника разом
+session-recall hub key revoke alice     # все устройства сотрудника разом
 session-recall hub key revoke a3f91c2b  # одно устройство по id
 ```
 

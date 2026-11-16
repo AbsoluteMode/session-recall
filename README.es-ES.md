@@ -111,7 +111,7 @@ lanzó la sesión; sus `repos` son aquello en lo que la sesión trabajó de verd
 nombran sus llamadas a herramientas (una edición, un `cd`, un `workdir` de Codex) se resuelve
 al repo git que la contiene — los worktrees y los alias por symlink colapsan a un solo
 checkout — y un repo distinto de la carpeta de lanzamiento necesita al menos tres llamadas
-para contar. Pasa `project="harmonia"` a cualquier herramienta de descubrimiento para obtener
+para contar. Pasa `project="payments"` a cualquier herramienta de descubrimiento para obtener
 las sesiones que trabajaron en ese repo, se lanzaran donde se lanzaran; `scope_cwd` también
 las incluye. `recall_search` devuelve como mucho dos anclas por sesión (`per_session`, `0` =
 sin límite) para que una sesión larga no llene la página, y recorta cada fragmento alrededor
@@ -175,7 +175,7 @@ indexed 2175 chunks from changed transcripts
 
 your history: 1053 sessions spanning 168 days, 40,037 searchable fragments
   Claude Code 372 · Codex 680 · Cursor 1
-  busiest: sidekey, trend_detection, glitch
+  busiest: api, web, worker
 ```
 
 Las incrustaciones alojadas de Voyage clasifican notablemente mejor que el modelo incluido;

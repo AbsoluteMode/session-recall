@@ -98,7 +98,7 @@ flowchart LR
 **会话属于哪个项目。** 锚点上的 `project` 是会话启动时所在的文件夹；`repos` 才是该会话真正
 动过的仓库。工具调用里出现的每个路径（一次编辑、一次 `cd`、Codex 的 `workdir`）都会解析到
 拥有它的 git 仓库——worktree 和符号链接别名会折叠成同一个检出——而启动文件夹以外的仓库至少
-要被调用三次才算数。给任何检索工具传 `project="harmonia"`，就能拿到所有动过这个仓库的会话，
+要被调用三次才算数。给任何检索工具传 `project="payments"`，就能拿到所有动过这个仓库的会话，
 无论它们在哪里启动；`scope_cwd` 也会包含它们。`recall_search` 每个会话最多保留两条结果
 （`per_session`，`0` 表示不限），避免一个长会话占满整页，并把摘要截在与查询匹配的段落附近。
 `recent_sessions` 读起来像一块状态看板：第一个真正的请求、最新的请求和回答、分支、仓库、
@@ -155,7 +155,7 @@ indexed 2175 chunks from changed transcripts
 
 your history: 1053 sessions spanning 168 days, 40,037 searchable fragments
   Claude Code 372 · Codex 680 · Cursor 1
-  busiest: sidekey, trend_detection, glitch
+  busiest: api, web, worker
 ```
 
 托管的 Voyage 嵌入在排序上明显优于内置模型；要使用它，请在索引前导出
