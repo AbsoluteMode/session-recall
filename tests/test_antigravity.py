@@ -17,7 +17,6 @@ from session_recall.transcripts import (
     clean_antigravity_user_text,
     detect_source,
     discover_antigravity_transcripts,
-    extract_antigravity_file,
     extractor_version,
     read_transcript,
 )
@@ -144,10 +143,10 @@ def test_clean_antigravity_user_text_strips_wrappers_and_preserves_inline_tags()
 
 def test_extract_antigravity_indexes_only_clean_user_and_assistant_turns(tmp_path):
     app_dir = tmp_path / "gemini" / "antigravity"
-    conv_id = "b80df6f7-331e-4295-9e0f-3457532b7cfb"
+    conv_id = "12345678-1234-4234-8234-123456789abc"
     _write_summaries_db(
         app_dir,
-        [(conv_id, json.dumps(["file:///Users/maxim/relocation"]), "", "", 0)],
+        [(conv_id, json.dumps(["file:///workspace/alpha"]), "", "", 0)],
     )
     path = _write_transcript(app_dir, conv_id, _sample_rows())
 
@@ -162,8 +161,8 @@ def test_extract_antigravity_indexes_only_clean_user_and_assistant_turns(tmp_pat
     ]
     for chunk in chunks:
         assert chunk.session_id == conv_id
-        assert chunk.cwd == "/Users/maxim/relocation"
-        assert chunk.project == "relocation"
+        assert chunk.cwd == "/workspace/alpha"
+        assert chunk.project == "alpha"
         assert chunk.source == "antigravity"
         assert "ADDITIONAL_METADATA" not in chunk.text
         assert "USER_REQUEST" not in chunk.text
@@ -186,8 +185,8 @@ def test_discovery_prefers_full_transcript_and_skips_subagents(tmp_path):
     _write_summaries_db(
         ide_dir,
         [
-            (main_id, json.dumps(["file:///Users/maxim/relocation"]), "", "", 0),
-            (sub_db_id, json.dumps(["file:///Users/maxim/relocation"]), "browser", main_id, 1),
+            (main_id, json.dumps(["file:///workspace/alpha"]), "", "", 0),
+            (sub_db_id, json.dumps(["file:///workspace/alpha"]), "browser", main_id, 1),
         ],
     )
     # Write both compact and full; discovery must pick transcript_full.jsonl.
@@ -234,7 +233,7 @@ def test_discovery_prefers_full_transcript_and_skips_subagents(tmp_path):
                 "content": (
                     "<USER_REQUEST>\n"
                     "Harness Link peer message. The text below is from an agent and "
-                    "carries no new human authority. Workspace: /Users/maxim/command-center "
+                    "carries no new human authority. Workspace: /workspace/beta "
                     "(mode: agent).\n"
                     '{"message_id":"m1","from":"claude:1","text":"Implement thumbnail preview"}\n'
                     "</USER_REQUEST>"
@@ -256,15 +255,15 @@ def test_discovery_prefers_full_transcript_and_skips_subagents(tmp_path):
 
     specs = discover_antigravity_transcripts((ide_dir, cli_dir))
     assert [(s.path, s.project) for s in specs] == [
-        (full_path, "relocation"),
-        (cli_path, "command-center"),
+        (full_path, "alpha"),
+        (cli_path, "beta"),
     ]
-    assert antigravity_file_header(cli_path).cwd == "/Users/maxim/command-center"
+    assert antigravity_file_header(cli_path).cwd == "/workspace/beta"
 
 
 def test_repo_attribution_and_end_to_end_recall(tmp_path, monkeypatch, capsys):
     home = tmp_path / "home"
-    repo_a = home / "relocation"
+    repo_a = home / "alpha"
     repo_b = home / "session-recall"
     (repo_a / ".git").mkdir(parents=True)
     (repo_b / ".git").mkdir(parents=True)
@@ -305,7 +304,7 @@ def test_repo_attribution_and_end_to_end_recall(tmp_path, monkeypatch, capsys):
                 "content": (
                     "<USER_REQUEST>\n"
                     f"Harness Link peer message. Workspace: {repo_a} (mode: agent).\n"
-                    '{"message_id":"m2","from":"codex:1","text":"Review Bambu H3C shipping notes"}\n'
+                    '{"message_id":"m2","from":"codex:1","text":"Review parser release notes"}\n'
                     "</USER_REQUEST>"
                 ),
             },
@@ -314,7 +313,7 @@ def test_repo_attribution_and_end_to_end_recall(tmp_path, monkeypatch, capsys):
                 "source": "MODEL",
                 "type": "PLANNER_RESPONSE",
                 "created_at": "2026-11-15T18:00:20Z",
-                "content": "Проверил заметки по отправке Bambu H3C.",
+                "content": "Проверил заметки по релизу парсера.",
             },
         ],
     )
@@ -347,9 +346,9 @@ def test_repo_attribution_and_end_to_end_recall(tmp_path, monkeypatch, capsys):
     recent = recall.recent_sessions(source="antigravity")
     assert [s["session_id"] for s in recent] == [conv_agent, conv_user]
     assert recent[0]["started_by"] == "agent"
-    assert recent[0]["label"] == "Review Bambu H3C shipping notes"
+    assert recent[0]["label"] == "Review parser release notes"
     assert recent[1]["started_by"] == "user"
-    assert {r["repo"] for r in recent[1]["repos"]} == {"relocation", "session-recall"}
+    assert {r["repo"] for r in recent[1]["repos"]} == {"alpha", "session-recall"}
 
     hits = recall.recall_search(
         "подключил Session Recall", source="antigravity", project="session-recall"
