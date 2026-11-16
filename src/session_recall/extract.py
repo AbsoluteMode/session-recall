@@ -5,6 +5,7 @@ from .models import Chunk
 from .scope import project_label
 from .transcripts import (
     TranscriptEvent,
+    extract_antigravity_file,
     extract_codex_file,
     extractor_version,
     iter_transcript_events,
@@ -54,7 +55,7 @@ def _clean_user_text(content: str) -> str | None:
 
 def extractor_tag(source: str) -> str:
     version = extractor_version(source)
-    return f"v{version}" if source == "claude" else f"codex-v{version}"
+    return f"v{version}" if source == "claude" else f"{source}-v{version}"
 
 
 def _mk(event: TranscriptEvent, project: str, role: str, text: str) -> Chunk:
@@ -126,4 +127,6 @@ def extract_file(path: str, project: str, source: str = "claude") -> list[Chunk]
         return _extract_claude(path, project)
     if source == "codex":
         return _extract_codex(path, project)
+    if source == "antigravity":
+        return extract_antigravity_file(path, project=project)
     raise ValueError(f"unknown transcript source: {source!r}")

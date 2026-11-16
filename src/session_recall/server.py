@@ -65,7 +65,7 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
                   on_date: str | None = None, project: str | None = None,
                   per_session: int = 2, include_summaries: bool = False,
                   recent_first: bool | None = None) -> dict:
-    """Semantically search past Claude Code, Codex and Cursor sessions.
+    """Semantically search past Claude Code, Codex, Cursor and Antigravity sessions.
 
     Returns {"anchors": [...ranked anchors...], "degraded": null | str}.
 
@@ -101,8 +101,8 @@ def recall_search(query: str, k: int = 10, scope_cwd: str | None = None,
     include_summaries: also rank compacted-session summaries (default false).
     recent_first: true = add the recency bonus, false = never, omit = only when
     the query asks for what is current.
-    source: optionally restrict to "claude", "codex", or "cursor"; omit for the
-    shared index.
+    source: optionally restrict to "claude", "codex", "cursor", or "antigravity";
+    omit for the shared index.
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD). Either may
     be omitted for an open-ended range.
     on_date: shorthand for one local calendar day; cannot be combined with a range.
@@ -148,7 +148,7 @@ def grep(pattern: str, session_id: str | None = None, scope_cwd: str | None = No
     project: a repo/project name (e.g. "harmonia"). Matches sessions that
     actually worked on that repo — by their tool calls, wherever they were
     launched — plus sessions launched in a folder of that name.
-    source: optionally restrict to "claude", "codex", or "cursor".
+    source: optionally restrict to "claude", "codex", "cursor", or "antigravity".
     limit: maximum number of matches returned (default 100).
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
     on_date: shorthand for one local calendar day; cannot be combined with a range.
@@ -179,13 +179,13 @@ def recent_sessions(scope_cwd: str | None = None, limit: int = 10,
     project: a repo/project name (e.g. "harmonia"). Matches sessions that
     actually worked on that repo — by their tool calls, wherever they were
     launched — plus sessions launched in a folder of that name.
-    source: optionally restrict to "claude", "codex", or "cursor".
+    source: optionally restrict to "claude", "codex", "cursor", or "antigravity".
     start_date/end_date: inclusive local calendar dates (YYYY-MM-DD).
     on_date: shorthand for one local calendar day; cannot be combined with a range.
     timezone: IANA timezone override; omit it to use the user's computer timezone.
-    Each entry: source (the agent: claude/codex/cursor), session_id, project
-    (launch folder), repos ([{repo, path, touches}] actually worked on, most
-    first), git_branch, started_by ("user" | "agent" — another session or a
+    Each entry: source (the agent: claude/codex/cursor/antigravity), session_id,
+    project (launch folder), repos ([{repo, path, touches}] actually worked on,
+    most first), git_branch, started_by ("user" | "agent" — another session or a
     program opened it | "automation" — a scheduled heartbeat; inferred from
     transcript metadata), turns, last_activity (epoch), last_activity_human,
     active (a turn in the last 10 minutes), label (the first real ask),

@@ -30,6 +30,18 @@ CURSOR_DB = Path(
     os.environ.get("SESSION_RECALL_CURSOR_DB") or _default_cursor_db()
 ).expanduser()
 
+ANTIGRAVITY_HOME = Path(
+    os.environ.get("SESSION_RECALL_ANTIGRAVITY_HOME")
+    or (Path.home() / ".gemini")
+).expanduser()
+ANTIGRAVITY_SURFACE_NAMES = ("antigravity", "antigravity-cli", "antigravity-ide")
+
+
+def antigravity_dirs(home: Path | None = None) -> tuple[Path, ...]:
+    """Antigravity app data roots (desktop IDE + agy CLI) under ~/.gemini."""
+    base = Path(ANTIGRAVITY_HOME if home is None else home).expanduser()
+    return tuple(base / name for name in ANTIGRAVITY_SURFACE_NAMES)
+
 # Embedding provider — PLUGGABLE. A bundled ONNX model is the no-key default;
 # Voyage remains the higher-quality hosted option. Any provider works: set the
 # env vars below (e.g. provider=openai,

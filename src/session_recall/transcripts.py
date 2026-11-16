@@ -1,17 +1,20 @@
-"""Streaming adapters for Claude Code, Codex and normalized Cursor JSONL.
+"""Streaming adapters for Claude Code, Codex, Antigravity and normalized Cursor JSONL.
 
 The envelopes are unrelated, so indexing and retrieval consume normalized
 events from here. Files are always streamed: Codex rollouts can be hundreds of
 megabytes and grep may touch the entire corpus.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
 import re
+import sqlite3
 from typing import Any, Iterator
+from urllib.parse import unquote, urlparse
 
 from .models import Chunk
 from .chunking import surface_pieces, surface_role
@@ -29,6 +32,25 @@ _CODEX_HARNESS_TAGS = (
 _CODEX_HARNESS_BLOCK = re.compile(
     "|".join(rf"<{tag}>.*?</{tag}>" for tag in _CODEX_HARNESS_TAGS), re.DOTALL,
 )
+
+_ANTIGRAVITY_UUID = re.compile(
+    r"/brain/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/"
+)
+_ANTIGRAVITY_HARNESS_TAGS = (
+    "ADDITIONAL_METADATA", "USER_SETTINGS_CHANGE", "SYSTEM_MESSAGE",
+    "EPHEMERAL_MESSAGE", "CONTEXT_SUMMARY",
+)
+_ANTIGRAVITY_HARNESS_BLOCK = re.compile(
+    "|".join(rf"<{tag}\b[^>]*>.*?</{tag}>" for tag in _ANTIGRAVITY_HARNESS_TAGS),
+    re.DOTALL,
+)
+_ANTIGRAVITY_USER_OPEN = re.compile(r"(?m)^[ \t]*<USER_REQUEST>[ \t]*\r?\n?")
+_ANTIGRAVITY_USER_CLOSE = re.compile(r"(?m)\r?\n?^[ \t]*</USER_REQUEST>[ \t]*$")
+_HARNESS_LINK_WORKSPACE = re.compile(r"\bWorkspace:\s*(/[^\s(]+)")
+
+# db_path -> (mtime_ns, {conversation_id: (cwd, is_sidechain)})
+_ANTIGRAVITY_DB_CACHE: dict[str, tuple[int, dict[str, tuple[str, bool]]]] = {}
 
 
 @dataclass(frozen=True)
@@ -98,9 +120,185 @@ def codex_cursor(session_id: str, byte_offset: int) -> str:
     return f"codex:{session_id}:{byte_offset}"
 
 
+def antigravity_cursor(session_id: str, byte_offset: int) -> str:
+    """Stable opaque cursor into an Antigravity conversation transcript."""
+    return f"antigravity:{session_id}:{byte_offset}"
+
+
 def clean_codex_user_text(content: str) -> str | None:
     cleaned = _CODEX_HARNESS_BLOCK.sub("", content).strip()
     return cleaned or None
+
+
+def clean_antigravity_user_text(content: str) -> str | None:
+    """Extract only the user's own prompt from an Antigravity USER_INPUT step."""
+    if not isinstance(content, str) or not content:
+        return None
+    cleaned = _ANTIGRAVITY_HARNESS_BLOCK.sub("", content).strip()
+    cleaned = _ANTIGRAVITY_USER_OPEN.sub("", cleaned)
+    cleaned = _ANTIGRAVITY_USER_CLOSE.sub("", cleaned)
+    cleaned = cleaned.strip()
+    if cleaned.startswith("<USER_REQUEST>") and cleaned.endswith("</USER_REQUEST>"):
+        cleaned = cleaned[len("<USER_REQUEST>"):-len("</USER_REQUEST>")].strip()
+    return cleaned or None
+
+
+def _antigravity_id_and_app_dir(path: str | Path) -> tuple[str, Path | None]:
+    p = Path(path)
+    if (len(p.parents) >= 4 and p.parent.name == "logs"
+            and p.parents[1].name == ".system_generated"
+            and p.parents[3].name == "brain"):
+        return p.parents[2].name, p.parents[4]
+    match = _ANTIGRAVITY_UUID.search(p.as_posix())
+    if match:
+        return match.group(1), None
+    return p.stem, None
+
+
+def _workspace_from_uris(raw_uris: Any) -> str:
+    if not raw_uris:
+        return ""
+    uris = raw_uris
+    if isinstance(raw_uris, str):
+        try:
+            uris = json.loads(raw_uris)
+        except ValueError:
+            return ""
+    if not isinstance(uris, list):
+        return ""
+    for uri in uris:
+        if not isinstance(uri, str) or not uri:
+            continue
+        if uri.startswith("file://"):
+            parsed = unquote(urlparse(uri).path)
+            if parsed.startswith("/"):
+                return parsed
+        elif uri.startswith("/"):
+            return uri
+    return ""
+
+
+def _antigravity_db_summary(app_dir: Path | None,
+                            session_id: str) -> tuple[str, bool] | None:
+    if app_dir is None:
+        return None
+    db_path = Path(app_dir) / "conversation_summaries.db"
+    try:
+        st = db_path.stat()
+    except OSError:
+        return None
+    key = str(db_path)
+    cached = _ANTIGRAVITY_DB_CACHE.get(key)
+    if cached is None or cached[0] != st.st_mtime_ns:
+        mapping: dict[str, tuple[str, bool]] = {}
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                rows = conn.execute(
+                    "SELECT conversation_id, workspace_uris, agent_name, "
+                    "parent_conversation_id, nesting_depth "
+                    "FROM conversation_summaries"
+                ).fetchall()
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error):
+            return None
+        for conv_id, raw_uris, agent_name, parent_id, depth in rows:
+            if not conv_id:
+                continue
+            cwd = _workspace_from_uris(raw_uris)
+            try:
+                depth_int = int(depth or 0)
+            except (TypeError, ValueError):
+                depth_int = 0
+            sidechain = bool(
+                str(parent_id or "").strip()
+                or str(agent_name or "").strip()
+                or depth_int > 0
+            )
+            mapping[str(conv_id)] = (cwd, sidechain)
+        _ANTIGRAVITY_DB_CACHE[key] = (st.st_mtime_ns, mapping)
+        cached = _ANTIGRAVITY_DB_CACHE[key]
+    return cached[1].get(session_id)
+
+
+def antigravity_file_header(path: str | Path) -> TranscriptFileMeta:
+    """Resolve Antigravity session identity, workspace cwd and subagent status."""
+    session_id, app_dir = _antigravity_id_and_app_dir(path)
+    summary = _antigravity_db_summary(app_dir, session_id)
+    cwd = summary[0] if summary is not None else ""
+    is_sidechain = summary[1] if summary is not None else False
+
+    if summary is None or not cwd:
+        saw_leading_system = False
+        saw_user_explicit = False
+        checked_first_record = False
+        try:
+            with open(path, "rb") as handle:
+                for raw in handle:
+                    try:
+                        obj = json.loads(raw)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    if not checked_first_record:
+                        checked_first_record = True
+                        if (obj.get("source") == "SYSTEM"
+                                and obj.get("type") == "SYSTEM_MESSAGE"):
+                            saw_leading_system = True
+                    if (obj.get("source") == "USER_EXPLICIT"
+                            and obj.get("type") == "USER_INPUT"):
+                        saw_user_explicit = True
+                        if not cwd:
+                            cleaned = clean_antigravity_user_text(obj.get("content") or "") or ""
+                            if cleaned.startswith("Harness Link peer message."):
+                                found = _HARNESS_LINK_WORKSPACE.search(cleaned)
+                                if found:
+                                    cwd = found.group(1)
+                        break
+                    if summary is not None and cwd:
+                        break
+        except OSError:
+            pass
+        if summary is None and saw_leading_system and not saw_user_explicit:
+            is_sidechain = True
+
+    return TranscriptFileMeta(
+        source="antigravity",
+        session_id=session_id,
+        cwd=cwd,
+        git_branch="",
+        is_sidechain=is_sidechain,
+    )
+
+
+def antigravity_transcript_files(roots: Iterable[Path]) -> list[Path]:
+    """Canonical transcript path per Antigravity conversation across app surfaces."""
+    picked: dict[str, tuple[tuple[int, int, int], Path]] = {}
+    for root in roots:
+        brain = Path(root) / "brain"
+        if not brain.is_dir():
+            continue
+        for conv_dir in sorted(brain.iterdir()):
+            if not conv_dir.is_dir():
+                continue
+            logs = conv_dir / ".system_generated" / "logs"
+            candidate = logs / "transcript_full.jsonl"
+            if not candidate.is_file():
+                candidate = logs / "transcript.jsonl"
+                if not candidate.is_file():
+                    continue
+            try:
+                st = candidate.stat()
+            except OSError:
+                continue
+            rank = (1 if candidate.name == "transcript_full.jsonl" else 0,
+                    st.st_size, st.st_mtime_ns)
+            prev = picked.get(conv_dir.name)
+            if prev is None or rank >= prev[0]:
+                picked[conv_dir.name] = (rank, candidate)
+    return [item[1] for _, item in sorted(picked.items())]
 
 
 def _source_is_subagent(value: Any) -> bool:
@@ -128,15 +326,31 @@ def _first_session_meta(path: str | Path) -> dict | None:
                 continue
             if obj.get("type") == "session_meta" and isinstance(obj.get("payload"), dict):
                 return obj
-            # An ordinary Claude turn proves this is not a Codex rollout and
-            # avoids scanning a whole Claude transcript looking for metadata.
+            # An ordinary Claude or Antigravity turn proves this is not a Codex
+            # rollout and avoids scanning a whole transcript looking for metadata.
             if obj.get("type") in {"user", "assistant"} and "message" in obj:
+                return None
+            if "step_index" in obj and obj.get("source") in {"USER_EXPLICIT", "MODEL", "SYSTEM"}:
                 return None
     return None
 
 
 def detect_source(path: str | Path) -> str:
-    return "codex" if _first_session_meta(path) else "claude"
+    with open(path, "rb") as handle:
+        for raw in handle:
+            try:
+                obj = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(obj, dict):
+                continue
+            if obj.get("type") == "session_meta" and isinstance(obj.get("payload"), dict):
+                return "codex"
+            if "step_index" in obj and obj.get("source") in {"USER_EXPLICIT", "MODEL", "SYSTEM"}:
+                return "antigravity"
+            if obj.get("type") in {"user", "assistant"} and "message" in obj:
+                return "claude"
+    return "claude"
 
 
 def codex_file_header(path: str | Path) -> TranscriptFileMeta:
@@ -203,8 +417,17 @@ def discover_codex_transcripts(sessions_dir: Path, archived_dir: Path) -> list[T
     return specs
 
 
+def discover_antigravity_transcripts(roots: Iterable[Path]) -> list[TranscriptSpec]:
+    specs: list[TranscriptSpec] = []
+    for path in antigravity_transcript_files(roots):
+        meta = antigravity_file_header(path)
+        if not meta.is_sidechain:
+            specs.append(TranscriptSpec(path, project_label(meta.cwd) or "antigravity", "antigravity"))
+    return specs
+
+
 def extractor_version(source: str) -> str:
-    versions = {"claude": "3", "codex": "3", "cursor": "2"}
+    versions = {"claude": "3", "codex": "3", "cursor": "2", "antigravity": "1"}
     try:
         return versions[source]
     except KeyError as exc:
@@ -378,6 +601,50 @@ def _codex_role_and_type(obj: dict) -> tuple[str, str]:
     return "", kind
 
 
+def _antigravity_role_and_type(obj: dict) -> tuple[str, str]:
+    step_source = str(obj.get("source") or "")
+    step_type = str(obj.get("type") or "")
+    if step_source == "USER_EXPLICIT" and step_type == "USER_INPUT":
+        return "user", "user_input"
+    if step_source == "MODEL" and step_type == "PLANNER_RESPONSE":
+        raw_content = obj.get("content")
+        if isinstance(raw_content, str) and raw_content.strip():
+            return "assistant", "planner_response"
+        if isinstance(obj.get("tool_calls"), list) and obj.get("tool_calls"):
+            return "tool", "planner_response"
+        return "assistant", "planner_response"
+    if step_source == "MODEL" and step_type == "GENERIC":
+        return "tool", "tool_result"
+    return "", step_type.lower() or "system"
+
+
+def _render_antigravity(obj: dict) -> str:
+    step_source = obj.get("source")
+    step_type = obj.get("type")
+    if step_source == "USER_EXPLICIT" and step_type == "USER_INPUT":
+        return clean_antigravity_user_text(obj.get("content") or "") or ""
+    if step_source == "MODEL" and step_type == "PLANNER_RESPONSE":
+        raw_content = obj.get("content")
+        visible = raw_content.strip() if isinstance(raw_content, str) else ""
+        tool_calls = obj.get("tool_calls") if isinstance(obj.get("tool_calls"), list) else []
+        if visible and not tool_calls:
+            return visible
+        if tool_calls:
+            parts = [visible] if visible else []
+            for call in tool_calls:
+                if isinstance(call, dict):
+                    parts.append(
+                        f"[tool_use:{call.get('name', '')}] "
+                        f"{_json_preview(call.get('args', {}), 300)}"
+                    )
+            return "\n".join(part for part in parts if part)
+        return ""
+    if step_source == "MODEL" and step_type == "GENERIC":
+        out = obj.get("content")
+        return f"[tool_result] {_json_preview(out, 500)}" if isinstance(out, str) and out.strip() else ""
+    return ""
+
+
 def iter_transcript_events(path: str | Path, source: str | None = None) -> Iterator[TranscriptEvent]:
     """Yield normalized records with byte-stable cursors, one JSONL line at a time."""
     path = str(path)
@@ -386,6 +653,11 @@ def iter_transcript_events(path: str | Path, source: str | None = None) -> Itera
     session_id = fallback_sid
     cwd = ""
     git_branch = ""
+    if source == "antigravity":
+        agy_meta = antigravity_file_header(path)
+        session_id = agy_meta.session_id
+        cwd = agy_meta.cwd
+        git_branch = agy_meta.git_branch
     saw_meta = False
     offset = 0
     with open(path, "rb") as handle:
@@ -430,6 +702,19 @@ def iter_transcript_events(path: str | Path, source: str | None = None) -> Itera
                     ts=parse_ts(timestamp_value), timestamp=timestamp,
                     role=str(message.get("role") or ""),
                     type=str(obj.get("type") or "cursor_event"), content=content,
+                    byte_offset=byte_offset, byte_len=byte_len, turn_index=turn_index,
+                )
+                continue
+
+            if source == "antigravity":
+                timestamp = str(obj.get("created_at") or obj.get("timestamp") or "")
+                role, event_type = _antigravity_role_and_type(obj)
+                yield TranscriptEvent(
+                    source=source, obj=obj, session_id=session_id,
+                    uuid=antigravity_cursor(session_id, byte_offset),
+                    cwd=cwd, git_branch=git_branch,
+                    ts=parse_ts(timestamp), timestamp=timestamp,
+                    role=role, type=event_type, content=_render_antigravity(obj),
                     byte_offset=byte_offset, byte_len=byte_len, turn_index=turn_index,
                 )
                 continue
@@ -504,11 +789,29 @@ def read_transcript(path: str, source: str) -> list[dict[str, Any]]:
         return [event.obj for event in iter_transcript_events(path, source="claude")]
     if source == "cursor":
         return [event.obj for event in iter_transcript_events(path, source="cursor")]
+    if source == "antigravity":
+        turns: list[dict[str, Any]] = []
+        for event in iter_transcript_events(path, source="antigravity"):
+            obj = event.obj
+            if obj.get("source") == "USER_EXPLICIT" and obj.get("type") == "USER_INPUT":
+                text = clean_antigravity_user_text(obj.get("content") or "") or ""
+                turns.append(_claude_shaped(
+                    event, surface=bool(text), role="user", event_type="user", content=text))
+            elif obj.get("source") == "MODEL" and obj.get("type") == "PLANNER_RESPONSE":
+                raw = obj.get("content")
+                text = raw.strip() if isinstance(raw, str) else ""
+                content = [{"type": "text", "text": text}] if text else []
+                turns.append(_claude_shaped(
+                    event, surface=bool(text), role="assistant",
+                    event_type="assistant", content=content))
+            else:
+                turns.append(_claude_shaped(event, surface=False, content=[]))
+        return turns
     if source != "codex":
         raise ValueError(f"unknown transcript source: {source!r}")
 
     events = list(iter_transcript_events(path, source="codex"))
-    turns: list[dict[str, Any]] = []
+    turns = []
     for event in events:
         obj = event.obj
         payload = obj.get("payload") or {}
@@ -602,12 +905,60 @@ def extract_codex_file(path: str, project: str = "") -> list[Chunk]:
     return chunks
 
 
+def extract_antigravity_file(path: str, project: str = "") -> list[Chunk]:
+    """Stream only the clean user prompts and visible assistant replies.
+
+    Thinking, tool calls, tool execution outputs (GENERIC), system messages and
+    compaction checkpoints are never embedded into chunks.
+    """
+    chunks: list[Chunk] = []
+
+    def make_chunk(event: TranscriptEvent, role: str, text: str) -> Chunk:
+        return Chunk(
+            session_id=event.session_id,
+            uuid=event.uuid,
+            role=role,
+            text=text,
+            project=project_label(event.cwd) or project,
+            cwd=event.cwd,
+            git_branch=event.git_branch,
+            ts=event.ts,
+            file_path=path,
+            byte_offset=event.byte_offset,
+            byte_len=event.byte_len,
+            turn_index=event.turn_index,
+            content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            source="antigravity",
+        )
+
+    for event in iter_transcript_events(path, source="antigravity"):
+        obj = event.obj
+        step_source = obj.get("source")
+        step_type = obj.get("type")
+        if step_source == "USER_EXPLICIT" and step_type == "USER_INPUT":
+            text = clean_antigravity_user_text(obj.get("content") or "")
+            if not text:
+                continue
+            role = surface_role("user", text)
+            for piece in surface_pieces(role, text):
+                chunks.append(make_chunk(event, role, piece))
+        elif step_source == "MODEL" and step_type == "PLANNER_RESPONSE":
+            raw = obj.get("content")
+            text = raw.strip() if isinstance(raw, str) else ""
+            if not text:
+                continue
+            role = surface_role("assistant", text)
+            for piece in surface_pieces(role, text):
+                chunks.append(make_chunk(event, role, piece))
+    return chunks
+
+
 def is_navigable(event: TranscriptEvent) -> bool:
-    # Preserve Claude's historic raw-line stepping. Codex bookkeeping records
-    # are skipped so navigation lands on readable messages/tools/reasoning.
+    # Preserve Claude's historic raw-line stepping. Codex/Antigravity bookkeeping
+    # records are skipped so navigation lands on readable messages/tools.
     if event.source == "claude":
         return True
-    if event.source == "cursor":
+    if event.source in ("cursor", "antigravity"):
         return bool(event.content)
     payload = event.obj.get("payload") or {}
     if (event.obj.get("type") == "response_item" and isinstance(payload, dict)

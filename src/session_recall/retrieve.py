@@ -130,9 +130,10 @@ class Recall:
 
     @staticmethod
     def _validate_source(source: str | None) -> None:
-        if source not in {None, "claude", "codex", "cursor"}:
+        if source not in {None, "claude", "codex", "cursor", "antigravity"}:
             raise ValueError(
-                f"source must be 'claude', 'codex', 'cursor', or omitted; got {source!r}")
+                f"source must be 'claude', 'codex', 'cursor', 'antigravity', "
+                f"or omitted; got {source!r}")
 
     @staticmethod
     def _anchor(c, score: "float | None", query: str = "",
@@ -147,7 +148,7 @@ class Recall:
     def _with_repos(self, anchors: list[Anchor]) -> list[Anchor]:
         """Attach each hit's session attribution (labels, most-touched first)."""
         keys = {(a.source, a.session_id) for a in anchors
-                if a.source in ("claude", "codex")}
+                if a.source in ("claude", "codex", "antigravity")}
         repos = self.store.session_repos(keys) if keys else {}
         for a in anchors:
             found = repos.get((a.source, a.session_id))
@@ -339,11 +340,12 @@ class Recall:
         recall_search resolves via chunks; grep anchors may point at raw turns
         that never became chunks (tool_result-only turns, filtered boilerplate),
         so fall back to the anchor's session: its chunk-bearing files, else the
-        <session_id>.jsonl transcript itself (indexed but chunk-less)."""
+        <session_id>.jsonl or /brain/<session_id>/ transcript itself."""
         self._validate_source(source)
         files: list[str] = []
         exact_files: set[str] = set()
-        for hinted_source in ((source,) if source else ("claude", "codex", "cursor")):
+        for hinted_source in (
+                (source,) if source else ("claude", "codex", "cursor", "antigravity")):
             hinted = self._anchor_files.get((hinted_source, session_id or "", uuid))
             if hinted and hinted not in files:
                 files.append(hinted)
@@ -364,10 +366,13 @@ class Recall:
             escaped = (session_id.replace("\\", "\\\\")
                        .replace("_", "\\_").replace("%", "\\%"))
             indexed_source_sql = " AND source = ?" if source else ""
-            indexed_params = ("%" + escaped + ".jsonl", source) if source else (
-                "%" + escaped + ".jsonl",)
+            like_file = "%" + escaped + ".jsonl"
+            like_dir = "%/" + escaped + "/%"
+            indexed_params = ((like_file, like_dir, source)
+                              if source else (like_file, like_dir))
             files += [r[0] for r in self.store.db.execute(
-                f"SELECT path FROM indexed_files WHERE path LIKE ? ESCAPE '\\'"
+                f"SELECT path FROM indexed_files WHERE "
+                f"(path LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\')"
                 f"{indexed_source_sql}", indexed_params).fetchall() if r[0] not in files]
         if files and not exact_files:
             # A resumed/mixed Claude transcript can carry a raw-only secondary
@@ -510,10 +515,10 @@ class Recall:
         for path, path_source in paths:
             rows = meta.get(path)
             if rows:
-                # Codex files have one stable thread id. Claude resumed/mixed
-                # files may contain raw-only secondary sessions absent from
-                # chunks, so their authoritative filter stays per-event below.
-                if (path_source == "codex" and session_id
+                # Codex and Antigravity files have one stable session id. Claude
+                # resumed/mixed files may contain raw-only secondary sessions
+                # absent from chunks, so their authoritative filter stays per-event.
+                if (path_source in ("codex", "antigravity") and session_id
                         and not any(s == session_id for s, _, _, _ in rows)):
                     continue
             try:
@@ -587,7 +592,7 @@ class Recall:
             root, limit, source=source, start_ts=start_ts, end_ts=end_ts,
             project=project)
         repos = self.store.session_repos(
-            (s, sid) for s, sid, *_ in rows if s in ("claude", "codex"))
+            (s, sid) for s, sid, *_ in rows if s in ("claude", "codex", "antigravity"))
         for row_source, sid, label, last_ts, turns in rows:
             # Who is doing what, at a glance: the first real ask (not the
             # side-session envelope or a desktop event), the latest ask and

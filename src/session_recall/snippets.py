@@ -14,6 +14,7 @@ event, a pasted block, a Codex heartbeat. `human_ask` finds the actual ask.
 # WHY: docs/decisions/2026-10-25-recall-for-registrar.md
 """
 
+import json
 import re
 
 _COMPACTION = re.compile(
@@ -29,6 +30,7 @@ _EVENT_BLOCK = re.compile(
 _PASTED_TAG = re.compile(r"</?pasted_content\b[^>]*>")
 _BRIEF = "Background (from the session that started this one)"
 _BRIEF_TASK = re.compile(r"(?m)^Task:\s*")
+_HARNESS_LINK_BRIEF = "Harness Link peer message."
 
 
 def strip_boilerplate(text: str) -> str:
@@ -99,4 +101,13 @@ def human_ask(text: str) -> str | None:
         task = _BRIEF_TASK.search(cleaned)
         if task:
             cleaned = cleaned[task.end():].strip()
+    elif cleaned.startswith(_HARNESS_LINK_BRIEF):
+        _, _, rest = cleaned.partition("\n")
+        if rest.strip():
+            try:
+                payload = json.loads(rest.strip())
+                if isinstance(payload, dict) and isinstance(payload.get("text"), str):
+                    cleaned = payload["text"].strip()
+            except ValueError:
+                cleaned = rest.strip()
     return cleaned or None
