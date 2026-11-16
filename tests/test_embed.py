@@ -113,3 +113,91 @@ def test_builtin_embedder_is_lazy_and_uses_the_query_path(monkeypatch):
 def test_make_embedder_knows_builtin(monkeypatch):
     from session_recall import embed
     assert isinstance(embed.make_embedder("builtin"), embed.BuiltinEmbedder)
+
+
+class _VoyageStub:
+    """Stands in for voyageai.Client with the real per-request token limit.
+    `tokens_per_char` models how dense the text is; Voyage counts tokens, the
+    indexer can only count characters."""
+    LIMIT = 120_000
+
+    def __init__(self, tokens_per_char=1.0):
+        self.tokens_per_char = tokens_per_char
+        self.calls = []
+
+    def embed(self, batch, model, input_type):
+        tokens = int(sum(len(t) for t in batch) * self.tokens_per_char)
+        self.calls.append((len(batch), tokens))
+        if len(batch) > 128:
+            raise RuntimeError("batch size limit")
+        if tokens > self.LIMIT:
+            raise RuntimeError(
+                f"Request to model 'voyage-4-large' failed. The max allowed tokens per "
+                f"submitted batch is {self.LIMIT}. Your batch has {tokens} tokens after truncation.")
+        return type("R", (), {"embeddings": [[float(len(t))] for t in batch]})()
+
+
+def _voyage(stub):
+    from session_recall.embed import VoyageEmbedder
+    e = VoyageEmbedder(model="voyage-4-large")
+    e._client = stub
+    return e
+
+
+def test_voyage_large_session_is_embedded_instead_of_failing_every_sync():
+    """The real failure: 128 dense 2000-char chunks = 240k tokens in one
+    request. Voyage refused it, the file was retried and refused on every sync,
+    and the session never became searchable."""
+    stub = _VoyageStub(tokens_per_char=0.94)
+    texts = ["x" * (1900 + i) for i in range(300)]      # distinct lengths = identity
+    vecs = _voyage(stub).embed_documents(texts)
+    assert [v[0] for v in vecs] == [float(len(t)) for t in texts], "one vector per text, in order"
+    assert all(tokens <= stub.LIMIT for _, tokens in stub.calls), "no request was refused"
+
+
+def test_voyage_small_texts_still_go_128_per_request():
+    stub = _VoyageStub()
+    _voyage(stub).embed_documents(["short"] * 300)
+    assert [n for n, _ in stub.calls] == [128, 128, 44], "no extra round trips for ordinary sessions"
+
+
+def test_voyage_splits_when_the_character_estimate_is_too_optimistic():
+    """Text denser than one token per character slips past the character
+    budget; the API's refusal must split the batch, not fail the file."""
+    stub = _VoyageStub(tokens_per_char=3.0)
+    texts = ["y" * (1000 + i) for i in range(90)]        # ~95k chars, ~285k tokens
+    vecs = _voyage(stub).embed_documents(texts)
+    assert [v[0] for v in vecs] == [float(len(t)) for t in texts]
+    assert any(tokens > stub.LIMIT for _, tokens in stub.calls), "the refusal path was exercised"
+
+
+def test_voyage_oversized_single_text_and_empty_input():
+    stub = _VoyageStub(tokens_per_char=0.5)
+    huge = "z" * 150_000
+    vecs = _voyage(stub).embed_documents(["a", huge, "b"])
+    assert [v[0] for v in vecs] == [1.0, 150_000.0, 1.0]
+    assert _voyage(_VoyageStub()).embed_documents([]) == []
+
+
+def test_voyage_other_errors_are_not_swallowed_or_retried():
+    import pytest
+
+    class _Down:
+        calls = 0
+        def embed(self, batch, model, input_type):
+            self.calls += 1
+            raise RuntimeError("401 invalid api key")
+
+    down = _Down()
+    with pytest.raises(RuntimeError, match="401"):
+        _voyage(down).embed_documents(["a", "b", "c"])
+    assert down.calls == 1
+
+
+def test_voyage_single_text_over_the_limit_surfaces_the_error():
+    """Nothing left to split: the error must reach the indexer's failed list."""
+    import pytest
+    stub = _VoyageStub(tokens_per_char=3.0)
+    with pytest.raises(RuntimeError, match="max allowed tokens"):
+        _voyage(stub).embed_documents(["q" * 90_000])
+    assert len(stub.calls) == 1

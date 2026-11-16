@@ -34,6 +34,36 @@ class FakeEmbedder:
         return self._vec(text)
 
 
+# Voyage rejects a whole request above 120k tokens, not just above 128 texts.
+# Seven ~85 MB transcripts (chunks of 4-6k characters) produced 128 texts =
+# 240k tokens, were refused on every sync and stayed out of the index.
+# Measured density there is 0.45 tokens per character, so 100k characters is
+# about 45k tokens and stays legal up to 1.2 tokens per character;
+# _embed_batch covers whatever the estimate still misses.
+BATCH_MAX_TEXTS = 128
+BATCH_MAX_CHARS = 100_000
+
+
+def _batches(texts: list[str], max_texts: int = BATCH_MAX_TEXTS,
+             max_chars: int = BATCH_MAX_CHARS):
+    """Consecutive slices of `texts`, each within both limits. A single text
+    larger than the budget travels alone — order and count are preserved."""
+    batch: list[str] = []
+    size = 0
+    for text in texts:
+        if batch and (len(batch) >= max_texts or size + len(text) > max_chars):
+            yield batch
+            batch, size = [], 0
+        batch.append(text)
+        size += len(text)
+    if batch:
+        yield batch
+
+
+def _batch_too_large(error: Exception) -> bool:
+    return "max allowed tokens per submitted batch" in str(error).lower()
+
+
 class VoyageEmbedder:
     """Voyage embeddings (default). Reads VOYAGE_API_KEY from env. The client is created
     lazily on first use, so constructing the embedder needs no key — the factory can
@@ -49,11 +79,21 @@ class VoyageEmbedder:
             self._client = voyageai.Client()
         return self._client
 
+    def _embed_batch(self, batch: list[str]) -> list[list[float]]:
+        try:
+            return self.client.embed(batch, model=self.model, input_type="document").embeddings
+        except Exception as e:
+            # The character budget is an estimate; the API's own verdict is exact.
+            # Halving always terminates: a single text is truncated server-side.
+            if len(batch) > 1 and _batch_too_large(e):
+                mid = len(batch) // 2
+                return self._embed_batch(batch[:mid]) + self._embed_batch(batch[mid:])
+            raise
+
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
-        for i in range(0, len(texts), 128):
-            batch = texts[i:i + 128]
-            out.extend(self.client.embed(batch, model=self.model, input_type="document").embeddings)
+        for batch in _batches(texts):
+            out.extend(self._embed_batch(batch))
         return out
 
     def embed_query(self, text: str) -> list[float]:
