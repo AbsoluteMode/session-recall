@@ -7,7 +7,7 @@
 <br />
 <br />
 
-<strong>Shared semantic memory for Claude Code, Codex, and Cursor.</strong><br />
+<strong>Shared semantic memory for Claude Code, Codex, Cursor, and Antigravity.</strong><br />
 Find an old decision by meaning. Open the raw evidence. Continue the work.
 
 <br />
@@ -46,7 +46,7 @@ conversation stays the source of truth.
 
 | | Capability | What it changes |
 |---|---|---|
-| **One memory** | Claude Code, Codex, and Cursor feed the same index | Switch agents without resetting the project story |
+| **One memory** | Claude Code, Codex, Cursor, and Antigravity feed the same index | Switch agents without resetting the project story |
 | **Semantic retrieval** | Search by meaning, not only exact words | Recover decisions you can describe but cannot quote |
 | **Deep navigation** | Open raw turns: tool calls, outputs, reasoning | Verify the answer instead of trusting a summary |
 | **Honest degradation** | A semantic outage is reported explicitly | A literal-only fallback never poses as semantic search |
@@ -91,7 +91,7 @@ flowchart LR
     R["what is current?"] --> RS["recent_sessions"]
 ```
 
-Every discovery tool accepts an optional `source` (`claude` | `codex` | `cursor`), a
+Every discovery tool accepts an optional `source` (`claude` | `codex` | `cursor` | `antigravity`), a
 `scope_cwd` to narrow results to the current repo (worktrees collapse to the repo root), and
 local calendar dates (`on_date`, or `start_date` / `end_date`, plus an IANA `timezone`).
 Ranked anchors carry provenance and a human-readable timestamp. `grep` scans **all** indexed
@@ -219,6 +219,23 @@ running. Portable or custom profile? Point at the database directly with
 
 </details>
 
+<details>
+<summary><strong>Antigravity</strong></summary>
+
+Register the MCP server with the `agy` CLI (the desktop app reads the same config):
+
+```bash
+agy mcp add session-recall "$(command -v session-recall-mcp)"
+```
+
+For background re-indexing, put [`hooks/hooks-antigravity.json`](hooks/hooks-antigravity.json)
+into `~/.gemini/config/hooks.json` (merge it if that file already has hooks). Transcripts
+are found under `~/.gemini/antigravity*/brain/` for both the desktop app and `agy`; point
+elsewhere with `SESSION_RECALL_ANTIGRAVITY_HOME=/path/to/.gemini`. Subagent conversations
+are skipped, like Claude sidechains.
+
+</details>
+
 ### 3. Check it works
 
 ```bash
@@ -228,7 +245,7 @@ session-recall search "something you actually discussed last week"
 Hits with a `score` mean semantic search is live. In the agent, `claude mcp list` should
 show `session-recall ✔ Connected`, and asking about past work should trigger
 `recall_search`. Nothing else to configure: each plugin ships its host's startup hook and
-re-indexes in the background, so the shared index keeps up with all three histories on its
+re-indexes in the background, so the shared index keeps up with every history on its
 own.
 
 ## How it works
@@ -239,17 +256,19 @@ flowchart TB
       CC["Claude Code JSONL"]
       CX["Codex JSONL"]
       CU["Cursor SQLite"]
+      AG["Antigravity JSONL"]
     end
 
     CC --> I["incremental indexer"]
     CX --> I
     CU -->|"consistent WAL snapshot"| I
+    AG --> I
     I --> V["conversation surface → embeddings"]
     I --> R["raw trace, kept local"]
     V --> DB["SQLite · sqlite-vec KNN · FTS5"]
     R --> DB
     DB --> MCP["five on-demand MCP tools"]
-    MCP --> A["Claude Code · Codex · Cursor · any MCP client"]
+    MCP --> A["Claude Code · Codex · Cursor · Antigravity · any MCP client"]
 ```
 
 Only the conversation "surface" is embedded — user prompts and assistant text replies. Tool
@@ -262,6 +281,12 @@ Cursor is read from its SQLite store with the online backup API, so a live WAL d
 captured consistently without blocking the editor. Its bubbles are normalized into durable,
 content-addressed JSONL snapshots under the data directory — deep navigation keeps working
 after Cursor closes, upgrades, or is uninstalled.
+
+Antigravity keeps one transcript per conversation, sometimes in two copies (a compact and a
+full log, or the same conversation under the desktop app and `agy`). The indexer picks one
+canonical file per conversation and drops the others, so a session never shows up twice.
+Only the user's own prompt is embedded — the metadata, settings, and system blocks
+Antigravity wraps around it are stripped first.
 
 Indexing is incremental and cheap on live transcripts: they are append-only, so unchanged
 chunks are matched by content hash and their vectors reused — only new turns hit the
@@ -294,7 +319,7 @@ session-recall prune    # drop rows for transcripts deleted from disk
 session-recall health   # the whole chain, verdict GREEN/AMBER/RED
 ```
 
-`search`, `recent`, `grep`, and `prune` all take `--source claude|codex|cursor`; omit it for
+`search`, `recent`, `grep`, and `prune` all take `--source claude|codex|cursor|antigravity`; omit it for
 the unified history. Date filters are inclusive and either boundary may be omitted.
 
 ## Embedding providers
@@ -518,7 +543,7 @@ This is a public repository. **Only code goes in it.** Runtime data lives under
 
 | Stays on your machine | Leaves only when you choose it |
 |---|---|
-| Original Claude Code and Codex transcripts | Conversation surface text → your configured hosted embedder |
+| Original Claude Code, Codex, and Antigravity transcripts | Conversation surface text → your configured hosted embedder |
 | Cursor's SQLite store and its normalized snapshots | An explicitly approved team-mode answer |
 | Tool calls, outputs, reasoning — the whole raw trace | Nothing, on the bundled/local embedding path |
 | The SQLite index and stored vectors | |
@@ -557,6 +582,7 @@ the failure that is otherwise invisible.
 | `Missing dependencies for SOCKS support` | A SOCKS proxy is set in the environment but `PySocks` is not installed in that venv. |
 | `recent_sessions` shows an old timestamp | The indexer has not succeeded recently. Run `session-recall index` by hand and read the output. |
 | Cursor lives in a custom profile | Set `SESSION_RECALL_CURSOR_DB=/path/to/User/globalStorage/state.vscdb`. |
+| Antigravity sessions are missing | Check `~/.gemini/antigravity*/brain/<id>/.system_generated/logs/`; for another location set `SESSION_RECALL_ANTIGRAVITY_HOME`. |
 
 ## Development
 
@@ -589,7 +615,7 @@ Engineering rationale and invariants live in [`docs/decisions/`](docs/decisions/
   implies a shared embedding path.
 - **Per-contact approval bypass** — skip per-answer approval for peers you fully trust;
   today every answer is approved explicitly.
-- **More histories** — other agents' transcripts beyond Claude Code, Codex, and Cursor.
+- **More histories** — other agents' transcripts beyond Claude Code, Codex, Cursor, and Antigravity.
 
 ## Contributing
 

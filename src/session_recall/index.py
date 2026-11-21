@@ -244,6 +244,22 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
     # hole; the next clean run reconciles it.
     for source in sorted(prunable_sources - failed_sources):
         store.prune_deleted(source=source)
+    if "antigravity" in prunable_sources - failed_sources:
+        # WHY: docs/decisions/2026-11-21-antigravity-clean-surface.md
+        # One conversation can have several files on disk at once: the compact
+        # transcript.jsonl next to transcript_full.jsonl, or the same id under
+        # two app surfaces. Discovery picks one canonical file; when that pick
+        # moves, the old path still EXISTS, so prune_deleted keeps it and the
+        # session shows up twice. Drop every indexed path discovery no longer
+        # chose — its vectors were already reused by session id above.
+        canonical = {str(path) for path, source, _ in jobs if source == "antigravity"}
+        scanned = [Path(root).expanduser().absolute() for root in antigravity_roots]
+        for (path,) in store.db.execute(
+                "SELECT path FROM indexed_files WHERE source = 'antigravity'").fetchall():
+            under_scan = any(Path(path).expanduser().absolute().is_relative_to(root)
+                             for root in scanned)
+            if under_scan and path not in canonical:
+                _forget_file(store, path)
     if failed:
         print(f"session-recall: {len(failed)} file(s) failed to index (will retry "
               f"next run):\n  " + "\n  ".join(failed[:10]), file=sys.stderr)

@@ -104,10 +104,32 @@ def human_ask(text: str) -> str | None:
     elif cleaned.startswith(_HARNESS_LINK_BRIEF):
         _, _, rest = cleaned.partition("\n")
         if rest.strip():
-            try:
-                payload = json.loads(rest.strip())
-                if isinstance(payload, dict) and isinstance(payload.get("text"), str):
-                    cleaned = payload["text"].strip()
-            except ValueError:
-                cleaned = rest.strip()
+            cleaned = _harness_link_text(rest.strip())
     return cleaned or None
+
+
+_JSON_TEXT_FIELD = re.compile(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)')
+
+
+def _harness_link_text(envelope: str) -> str:
+    """The `text` of a Harness Link envelope, even when the JSON is cut off.
+
+    A long message reaches us as the first chunk piece only, so the envelope
+    is often truncated mid-string and json.loads fails; the raw JSON then
+    made a useless label (`{"message_id":…`)."""
+    try:
+        payload = json.loads(envelope)
+        if isinstance(payload, dict) and isinstance(payload.get("text"), str):
+            return payload["text"].strip()
+    except ValueError:
+        pass
+    found = _JSON_TEXT_FIELD.search(envelope)
+    if not found:
+        return envelope
+    raw = found.group(1)
+    while raw:
+        try:
+            return json.loads(f'"{raw}"').strip()
+        except ValueError:
+            raw = raw[:-1]  # a cut inside an escape such as \u04 or a lone backslash
+    return envelope

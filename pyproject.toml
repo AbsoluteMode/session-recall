@@ -1,7 +1,7 @@
 [project]
 name = "session-recall"
-version = "0.6.1"
-description = "Semantic recall over your local Claude Code, Codex, and Cursor history — one shared index, searchable by meaning"
+version = "0.7.0"
+description = "Semantic recall over your local Claude Code, Codex, Cursor, and Antigravity history — one shared index, searchable by meaning"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

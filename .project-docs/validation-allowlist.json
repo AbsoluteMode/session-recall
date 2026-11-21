@@ -244,14 +244,74 @@
     {
       "path": "docs/decisions/2026-08-06-team-hub-central-index.md",
       "rule": "sensitive-assignment",
-      "literal": "token: \u2026\u00bb.",
+      "literal": "token: …».",
       "reason": "Documented example or GitHub Actions permission keyword; this is not a credential value."
     },
     {
       "path": "skills/setup/SKILL.md",
       "rule": "sensitive-assignment",
-      "literal": "VOYAGE_API_KEY=\u2026`",
+      "literal": "VOYAGE_API_KEY=…`",
       "reason": "Documented example using an ellipsis placeholder, not a credential value."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/config/hooks.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.es-ES.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/antigravity*/brain/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/config/hooks.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/antigravity*/brain/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/config/hooks.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "README.zh-CN.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/antigravity*/brain/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/config/hooks.json",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/README.ru.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/antigravity*/brain/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-11-21-antigravity-clean-surface.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini/antigravity*/brain/",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
+    },
+    {
+      "path": "docs/decisions/2026-11-21-antigravity-clean-surface.md",
+      "rule": "personal-path",
+      "literal": "~/.gemini",
+      "reason": "Documented example of a standard runtime path, with no personal username or credential."
     }
   ]
 }

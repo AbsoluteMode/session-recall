@@ -910,6 +910,7 @@ def extract_antigravity_file(path: str, project: str = "") -> list[Chunk]:
 
     Thinking, tool calls, tool execution outputs (GENERIC), system messages and
     compaction checkpoints are never embedded into chunks.
+    WHY: docs/decisions/2026-11-21-antigravity-clean-surface.md
     """
     chunks: list[Chunk] = []
 
