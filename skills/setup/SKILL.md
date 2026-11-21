@@ -13,8 +13,11 @@ command you need is written here. All state lives outside the repo
 ## 0. Install (skip if `session-recall --help` already works)
 
 ```bash
-pipx install git+https://github.com/AbsoluteMode/session-recall
+pipx install session-recall-mcp
 ```
+
+If that fails (no PyPI access, or the user wants the latest `main`), install
+from git instead: `pipx install git+https://github.com/AbsoluteMode/session-recall`.
 
 Plugin (gives the agent recall tools + auto-fresh index): in Claude Code run
 `/plugin marketplace add AbsoluteMode/session-recall` then
