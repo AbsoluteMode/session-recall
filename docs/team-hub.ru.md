@@ -29,8 +29,10 @@
 ### Шаг 1. Установка
 
 ```bash
-pipx install git+https://github.com/AbsoluteMode/session-recall
+pipx install session-recall-mcp
 ```
+
+Свежий `main` вместо релиза с PyPI: `pipx install git+https://github.com/AbsoluteMode/session-recall`.
 
 Плагин для агента (даёт ему инструменты поиска и автообновление):
 

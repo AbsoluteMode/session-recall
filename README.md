@@ -148,9 +148,11 @@ your agent. Budget about two minutes plus the first index run.
 ### 1. Install the CLI and build the index
 
 ```bash
-pipx install git+https://github.com/AbsoluteMode/session-recall
+pipx install session-recall-mcp
 session-recall setup   # one question (interaction language), then the first index
 ```
+
+Latest `main` instead of the PyPI release: `pipx install git+https://github.com/AbsoluteMode/session-recall`.
 
 No key required: with nothing configured, indexing runs on a bundled CPU model, downloaded
 once and picked by your interaction language. The first run walks your whole history —

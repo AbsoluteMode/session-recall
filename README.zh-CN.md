@@ -141,9 +141,11 @@ flowchart LR
 ### 1. 安装 CLI 并构建索引
 
 ```bash
-pipx install git+https://github.com/AbsoluteMode/session-recall
+pipx install session-recall-mcp
 session-recall setup   # one question (interaction language), then the first index
 ```
+
+想用最新的 `main` 而不是 PyPI 发布版：`pipx install git+https://github.com/AbsoluteMode/session-recall`。
 
 无需密钥：在什么都不配置的情况下，索引由内置的 CPU 模型完成，模型只下载一次，
 并按你的交互语言选定。首次运行会走完你的全部历史——数月的会话记录需要几分钟，

@@ -156,9 +156,11 @@ docs старше 30 дней несёт `"stale": true`.
 ### 1. Установить CLI и построить индекс
 
 ```bash
-pipx install git+https://github.com/AbsoluteMode/session-recall
+pipx install session-recall-mcp
 session-recall setup   # one question (interaction language), then the first index
 ```
+
+Свежий `main` вместо релиза с PyPI: `pipx install git+https://github.com/AbsoluteMode/session-recall`.
 
 Ключ не нужен: без всякой настройки индексация идёт на встроенной CPU-модели — она
 скачивается один раз и выбирается по языку общения. Первый прогон проходит всю историю

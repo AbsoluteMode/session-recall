@@ -1,5 +1,7 @@
 [project]
-name = "session-recall"
+# PyPI name: "session-recall" on PyPI is an unrelated project by another author.
+# The commands stay `session-recall` and `session-recall-mcp`.
+name = "session-recall-mcp"
 version = "0.7.0"
 description = "Semantic recall over your local Claude Code, Codex, Cursor, and Antigravity history — one shared index, searchable by meaning"
 readme = "README.md"

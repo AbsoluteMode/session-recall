@@ -160,9 +160,11 @@ a tu agente. Calcula unos dos minutos más la primera ejecución del índice.
 ### 1. Instala el CLI y construye el índice
 
 ```bash
-pipx install git+https://github.com/AbsoluteMode/session-recall
+pipx install session-recall-mcp
 session-recall setup   # one question (interaction language), then the first index
 ```
+
+Para el `main` más reciente en lugar de la versión de PyPI: `pipx install git+https://github.com/AbsoluteMode/session-recall`.
 
 No hace falta clave: sin nada configurado, la indexación corre sobre un modelo de CPU
 incluido, descargado una vez y elegido según tu idioma de interacción. La primera ejecución
