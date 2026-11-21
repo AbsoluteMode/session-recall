@@ -7,7 +7,7 @@
 <br />
 <br />
 
-<strong>Claude Code、Codex 与 Cursor 的共享语义记忆。</strong><br />
+<strong>Claude Code、Codex、Cursor 与 Antigravity 的共享语义记忆。</strong><br />
 按语义找回旧日决策。打开原始证据。继续当时的工作。
 
 <br />
@@ -46,7 +46,7 @@ Session Recall 把这些历史汇成一个本地优先的索引，再通过五�
 
 | | 能力 | 带来的改变 |
 |---|---|---|
-| **同一份记忆** | Claude Code、Codex 和 Cursor 写入同一个索引 | 切换智能体时无需从头重述项目脉络 |
+| **同一份记忆** | Claude Code、Codex、Cursor 和 Antigravity 写入同一个索引 | 切换智能体时无需从头重述项目脉络 |
 | **语义检索** | 按语义搜索，而不只是精确字词 | 找回那些你能描述却无法逐字引用的决策 |
 | **深度导航** | 打开原始轮次：工具调用、输出、推理过程 | 亲自核实答案，而不是轻信摘要 |
 | **诚实降级** | 语义搜索失效时会被明确报告 | 纯字面回退绝不冒充语义搜索 |
@@ -89,7 +89,7 @@ flowchart LR
     R["what is current?"] --> RS["recent_sessions"]
 ```
 
-每个检索工具都接受可选的 `source`（`claude` | `codex` | `cursor`）、把结果收窄到当前仓库的
+每个检索工具都接受可选的 `source`（`claude` | `codex` | `cursor` | `antigravity`）、把结果收窄到当前仓库的
 `scope_cwd`（worktree 会折叠到仓库根目录），以及本地日历日期（`on_date`，或
 `start_date` / `end_date`，外加 IANA `timezone`）。排好序的锚点自带出处与人类可读的时间戳。
 `grep` 按需扫描**所有**已索引的会话记录——包括那些从未成为搜索分块的幕后轮次
@@ -98,7 +98,7 @@ flowchart LR
 **会话属于哪个项目。** 锚点上的 `project` 是会话启动时所在的文件夹；`repos` 才是该会话真正
 动过的仓库。工具调用里出现的每个路径（一次编辑、一次 `cd`、Codex 的 `workdir`）都会解析到
 拥有它的 git 仓库——worktree 和符号链接别名会折叠成同一个检出——而启动文件夹以外的仓库至少
-要被调用三次才算数。给任何检索工具传 `project="harmonia"`，就能拿到所有动过这个仓库的会话，
+要被调用三次才算数。给任何检索工具传 `project="payments"`，就能拿到所有动过这个仓库的会话，
 无论它们在哪里启动；`scope_cwd` 也会包含它们。`recall_search` 每个会话最多保留两条结果
 （`per_session`，`0` 表示不限），避免一个长会话占满整页，并把摘要截在与查询匹配的段落附近。
 `recent_sessions` 读起来像一块状态看板：第一个真正的请求、最新的请求和回答、分支、仓库、
@@ -155,7 +155,7 @@ indexed 2175 chunks from changed transcripts
 
 your history: 1053 sessions spanning 168 days, 40,037 searchable fragments
   Claude Code 372 · Codex 680 · Cursor 1
-  busiest: sidekey, trend_detection, glitch
+  busiest: api, web, worker
 ```
 
 托管的 Voyage 嵌入在排序上明显优于内置模型；要使用它，请在索引前导出
@@ -210,6 +210,23 @@ Cursor 会按其 macOS/Linux 常规数据路径被自动检测，且无需处于
 
 </details>
 
+<details>
+<summary><strong>Antigravity</strong></summary>
+
+用 `agy` CLI 注册 MCP 服务器（桌面应用读取同一份配置）：
+
+```bash
+agy mcp add session-recall "$(command -v session-recall-mcp)"
+```
+
+如需后台重新索引，把 [`hooks/hooks-antigravity.json`](hooks/hooks-antigravity.json)
+放进 `~/.gemini/config/hooks.json`（若该文件已有钩子则合并）。会话记录从
+`~/.gemini/antigravity*/brain/` 读取，桌面应用和 `agy` 的都包括；其他位置用
+`SESSION_RECALL_ANTIGRAVITY_HOME=/path/to/.gemini` 指定。子智能体会话会被跳过，与 Claude 的
+sidechain 相同。
+
+</details>
+
 ### 3. 验证是否生效
 
 ```bash
@@ -218,7 +235,7 @@ session-recall search "something you actually discussed last week"
 
 结果带有 `score` 就说明语义搜索已生效。在智能体里，`claude mcp list` 应显示
 `session-recall ✔ Connected`，而询问过去的工作应触发 `recall_search`。再无其他要配置的：
-每个插件都自带其宿主的启动钩子并在后台重新索引，共享索引会自行跟上三份历史的进度。
+每个插件都自带其宿主的启动钩子并在后台重新索引，共享索引会自行跟上所有历史的进度。
 
 ## 工作原理
 
@@ -228,17 +245,19 @@ flowchart TB
       CC["Claude Code JSONL"]
       CX["Codex JSONL"]
       CU["Cursor SQLite"]
+      AG["Antigravity JSONL"]
     end
 
     CC --> I["incremental indexer"]
     CX --> I
     CU -->|"consistent WAL snapshot"| I
+    AG --> I
     I --> V["conversation surface → embeddings"]
     I --> R["raw trace, kept local"]
     V --> DB["SQLite · sqlite-vec KNN · FTS5"]
     R --> DB
     DB --> MCP["five on-demand MCP tools"]
-    MCP --> A["Claude Code · Codex · Cursor · any MCP client"]
+    MCP --> A["Claude Code · Codex · Cursor · Antigravity · any MCP client"]
 ```
 
 只有对话的“表层”会被嵌入——用户提示词与助手的文字回复。工具调用、结果、推理过程
@@ -249,6 +268,11 @@ flowchart TB
 Cursor 的数据经 online backup API 从其 SQLite 存储读取，因此活动中的 WAL 数据库也能
 被一致地捕获，且不阻塞编辑器。其 bubble 会被规范化为数据目录下持久、按内容寻址的
 JSONL 快照——即使 Cursor 关闭、升级或被卸载，深度导航依然可用。
+
+Antigravity 每个对话保存一份会话记录，有时会有两份副本（精简日志和完整日志，或同一对话同时
+出现在桌面应用和 `agy` 中）。索引器为每个对话只选一个规范文件并丢弃其余副本，因此同一会话
+不会出现两次。只有用户本人的输入会被嵌入——Antigravity 包裹在外的元数据、设置和系统块会先被
+剥离。
 
 索引是增量式的，对活跃会话记录开销很小：它们只会追加，未变化的分块按内容哈希匹配
 并复用已有向量——只有新轮次才会触达嵌入提供方。把 Codex rollout 移入归档同样复用
@@ -280,7 +304,7 @@ session-recall prune    # drop rows for transcripts deleted from disk
 session-recall health   # the whole chain, verdict GREEN/AMBER/RED
 ```
 
-`search`、`recent`、`grep` 和 `prune` 都接受 `--source claude|codex|cursor`；省略即为
+`search`、`recent`、`grep` 和 `prune` 都接受 `--source claude|codex|cursor|antigravity`；省略即为
 统一历史。日期过滤是闭区间，两端边界均可省略。
 
 ## 嵌入提供方
@@ -490,7 +514,7 @@ revert，与团队共享这份记忆只需把仓库推到某个私有位置。�
 
 | 留在你的机器上 | 只有你主动选择才会离开 |
 |---|---|
-| Claude Code 与 Codex 的原始会话记录 | 对话表层文本 → 你配置的托管嵌入器 |
+| Claude Code、Codex 与 Antigravity 的原始会话记录 | 对话表层文本 → 你配置的托管嵌入器 |
 | Cursor 的 SQLite 存储及其规范化快照 | 一条经明确批准的团队模式答案 |
 | 工具调用、输出、推理过程——完整的原始追踪 | 走内置/本地嵌入路径时——什么都不会离开 |
 | SQLite 索引与已存储的向量 | |
@@ -527,6 +551,7 @@ Freshness 比较的是磁盘上最新的会话记录与索引中最新的轮次�
 | `Missing dependencies for SOCKS support` | 环境中设置了 SOCKS 代理，但该 venv 里没有安装 `PySocks`。 |
 | `recent_sessions` 显示的时间戳很旧 | 索引器最近没有成功运行过。手动运行 `session-recall index` 并阅读输出。 |
 | Cursor 使用自定义配置目录 | 设置 `SESSION_RECALL_CURSOR_DB=/path/to/User/globalStorage/state.vscdb`。 |
+| 找不到 Antigravity 会话 | 检查 `~/.gemini/antigravity*/brain/<id>/.system_generated/logs/`；其他位置请设置 `SESSION_RECALL_ANTIGRAVITY_HOME`。 |
 
 ## 开发
 
@@ -558,7 +583,7 @@ claude mcp add session-recall --scope user -- /absolute/path/.venv/bin/session-r
   未解问题：谁搜索谁就得嵌入查询，因此共享向量空间意味着共享嵌入链路。
 - **按联系人绕过审批**——对你完全信任的对等方跳过逐条答案审批；目前每个答案
   都需要明确批准。
-- **更多历史来源**——Claude Code、Codex 和 Cursor 之外其他智能体的会话记录。
+- **更多历史来源**——Claude Code、Codex、Cursor 和 Antigravity 之外其他智能体的会话记录。
 
 ## 参与贡献
 

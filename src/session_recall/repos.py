@@ -3,8 +3,8 @@
 `chunks.project` is the folder the session was LAUNCHED in. That is often not
 the project: a session opened in one repo's worktree edits another repo by
 absolute path, a desktop scratch folder works on a real repo, a symlinked
-alias (`~/exodia -> whytap`) splits one repo into two names. A question like
-"what happened in harmonia" then misses the sessions that did the work.
+alias (`~/legacy-app -> main-app`) splits one repo into two names. A question like
+"what happened in payments" then misses the sessions that did the work.
 
 The evidence is already in every transcript: the tool calls. Every path a
 call names — an Edit's file_path, a `cd`, a `git -C`, a Codex workdir — is
@@ -60,6 +60,7 @@ _CODEX_WORKTREE = re.compile(r"/\.codex/worktrees/[^/]+/(?P<name>[^/]+)(?P<rest>
 # opened). A side session is opened by another session with a written brief;
 # a Codex automation wakes up on a heartbeat.
 _AGENT_BRIEF = "Background (from the session that started this one)"
+_HARNESS_LINK_BRIEF = "Harness Link peer message."
 _HEARTBEAT = "<heartbeat>"
 
 
@@ -234,6 +235,14 @@ def _tool_inputs(event) -> list[str]:
             return []
         return [_flatten(payload.get("arguments", payload.get("input",
                                                          payload.get("action"))))]
+    if event.source == "antigravity":
+        if obj.get("source") != "MODEL":
+            return []
+        tool_calls = obj.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            return []
+        return [_flatten(call.get("args")) for call in tool_calls
+                if isinstance(call, dict) and call.get("args") is not None]
     return []
 
 
@@ -255,7 +264,7 @@ def _first_user_text(event) -> str | None:
             from .extract import _clean_user_text
             return _clean_user_text(message["content"])
         return None
-    if event.source == "codex" and event.role == "user" and event.content.strip():
+    if event.source in ("codex", "antigravity") and event.role == "user" and event.content.strip():
         return event.content
     return None
 
@@ -269,7 +278,7 @@ def classify_starter(source: str, entrypoint: str, originator: str,
     text = (first_text or "").lstrip()
     if text.startswith(_HEARTBEAT):
         return "automation"
-    if text.startswith(_AGENT_BRIEF):
+    if text.startswith(_AGENT_BRIEF) or text.startswith(_HARNESS_LINK_BRIEF):
         return "agent"
     if source == "claude" and entrypoint.startswith("sdk"):
         return "agent"

@@ -7,7 +7,7 @@
 <br />
 <br />
 
-<strong>Memoria semántica compartida para Claude Code, Codex y Cursor.</strong><br />
+<strong>Memoria semántica compartida para Claude Code, Codex, Cursor y Antigravity.</strong><br />
 Encuentra una decisión antigua por su significado. Abre la evidencia en bruto. Continúa el trabajo.
 
 <br />
@@ -50,7 +50,7 @@ que alguien mantiene a mano: la conversación original sigue siendo la fuente de
 
 | | Capacidad | Qué cambia |
 |---|---|---|
-| **Una sola memoria** | Claude Code, Codex y Cursor alimentan el mismo índice | Cambia de agente sin reiniciar la historia del proyecto |
+| **Una sola memoria** | Claude Code, Codex, Cursor y Antigravity alimentan el mismo índice | Cambia de agente sin reiniciar la historia del proyecto |
 | **Recuperación semántica** | Busca por significado, no solo por palabras exactas | Recupera decisiones que puedes describir pero no citar |
 | **Navegación profunda** | Abre los turnos en bruto: llamadas a herramientas, salidas, razonamiento | Verifica la respuesta en lugar de fiarte de un resumen |
 | **Degradación honesta** | Una caída de la parte semántica se comunica explícitamente | Un respaldo solo literal nunca se hace pasar por búsqueda semántica |
@@ -98,7 +98,7 @@ flowchart LR
     R["what is current?"] --> RS["recent_sessions"]
 ```
 
-Cada herramienta de descubrimiento acepta un `source` opcional (`claude` | `codex` | `cursor`),
+Cada herramienta de descubrimiento acepta un `source` opcional (`claude` | `codex` | `cursor` | `antigravity`),
 un `scope_cwd` para acotar los resultados al repo actual (los worktrees colapsan a la raíz
 del repo) y fechas del calendario local (`on_date`, o `start_date` / `end_date`, más un
 `timezone` IANA). Las anclas clasificadas llevan su procedencia y una marca de tiempo
@@ -111,7 +111,7 @@ lanzó la sesión; sus `repos` son aquello en lo que la sesión trabajó de verd
 nombran sus llamadas a herramientas (una edición, un `cd`, un `workdir` de Codex) se resuelve
 al repo git que la contiene — los worktrees y los alias por symlink colapsan a un solo
 checkout — y un repo distinto de la carpeta de lanzamiento necesita al menos tres llamadas
-para contar. Pasa `project="harmonia"` a cualquier herramienta de descubrimiento para obtener
+para contar. Pasa `project="payments"` a cualquier herramienta de descubrimiento para obtener
 las sesiones que trabajaron en ese repo, se lanzaran donde se lanzaran; `scope_cwd` también
 las incluye. `recall_search` devuelve como mucho dos anclas por sesión (`per_session`, `0` =
 sin límite) para que una sesión larga no llene la página, y recorta cada fragmento alrededor
@@ -175,7 +175,7 @@ indexed 2175 chunks from changed transcripts
 
 your history: 1053 sessions spanning 168 days, 40,037 searchable fragments
   Claude Code 372 · Codex 680 · Cursor 1
-  busiest: sidekey, trend_detection, glitch
+  busiest: api, web, worker
 ```
 
 Las incrustaciones alojadas de Voyage clasifican notablemente mejor que el modelo incluido;
@@ -234,6 +234,23 @@ con `SESSION_RECALL_CURSOR_DB=/path/to/User/globalStorage/state.vscdb`.
 
 </details>
 
+<details>
+<summary><strong>Antigravity</strong></summary>
+
+Registra el servidor MCP con la CLI `agy` (la app de escritorio lee la misma configuración):
+
+```bash
+agy mcp add session-recall "$(command -v session-recall-mcp)"
+```
+
+Para reindexar en segundo plano, copia [`hooks/hooks-antigravity.json`](hooks/hooks-antigravity.json)
+en `~/.gemini/config/hooks.json` (fusiónalo si ese archivo ya tiene hooks). Las
+transcripciones se buscan en `~/.gemini/antigravity*/brain/`, tanto de la app de escritorio
+como de `agy`; para otra ubicación usa `SESSION_RECALL_ANTIGRAVITY_HOME=/path/to/.gemini`.
+Las conversaciones de subagentes se omiten, igual que los sidechains de Claude.
+
+</details>
+
 ### 3. Comprueba que funciona
 
 ```bash
@@ -244,7 +261,7 @@ Los resultados con `score` significan que la búsqueda semántica está viva. En
 `claude mcp list` debería mostrar `session-recall ✔ Connected`, y preguntar por trabajo
 pasado debería disparar `recall_search`. No hay nada más que configurar: cada plugin incluye
 el hook de arranque de su host y reindexa en segundo plano, de modo que el índice compartido
-se mantiene al día con los tres historiales por sí solo.
+se mantiene al día con todos los historiales por sí solo.
 
 ## Cómo funciona
 
@@ -254,17 +271,19 @@ flowchart TB
       CC["Claude Code JSONL"]
       CX["Codex JSONL"]
       CU["Cursor SQLite"]
+      AG["Antigravity JSONL"]
     end
 
     CC --> I["incremental indexer"]
     CX --> I
     CU -->|"consistent WAL snapshot"| I
+    AG --> I
     I --> V["conversation surface → embeddings"]
     I --> R["raw trace, kept local"]
     V --> DB["SQLite · sqlite-vec KNN · FTS5"]
     R --> DB
     DB --> MCP["five on-demand MCP tools"]
-    MCP --> A["Claude Code · Codex · Cursor · any MCP client"]
+    MCP --> A["Claude Code · Codex · Cursor · Antigravity · any MCP client"]
 ```
 
 Solo se incrusta la «superficie» de la conversación — los prompts del usuario y las
@@ -279,6 +298,12 @@ datos WAL viva se captura de forma consistente sin bloquear el editor. Sus burbu
 normalizan en instantáneas JSONL duraderas y direccionadas por contenido dentro del
 directorio de datos — la navegación profunda sigue funcionando después de que Cursor se
 cierre, se actualice o se desinstale.
+
+Antigravity guarda una transcripción por conversación, a veces en dos copias (un log compacto
+y uno completo, o la misma conversación en la app de escritorio y en `agy`). El indexador
+elige un archivo canónico por conversación y descarta los demás, así que una sesión nunca
+aparece dos veces. Solo se embebe el propio mensaje del usuario: los bloques de metadatos,
+ajustes y sistema con los que Antigravity lo envuelve se eliminan antes.
 
 La indexación es incremental y barata sobre transcripciones vivas: son de solo añadir
 (append-only), así que los fragmentos sin cambios se emparejan por hash de contenido y sus
@@ -312,7 +337,7 @@ session-recall prune    # drop rows for transcripts deleted from disk
 session-recall health   # the whole chain, verdict GREEN/AMBER/RED
 ```
 
-`search`, `recent`, `grep` y `prune` aceptan `--source claude|codex|cursor`; omítelo para el
+`search`, `recent`, `grep` y `prune` aceptan `--source claude|codex|cursor|antigravity`; omítelo para el
 historial unificado. Los filtros de fecha son inclusivos y puede omitirse cualquiera de los
 dos límites.
 
@@ -548,7 +573,7 @@ acabar en un commit.
 
 | Se queda en tu máquina | Sale solo cuando tú lo decides |
 |---|---|
-| Las transcripciones originales de Claude Code y Codex | El texto de superficie de la conversación → el embedder alojado que configures |
+| Las transcripciones originales de Claude Code, Codex y Antigravity | El texto de superficie de la conversación → el embedder alojado que configures |
 | El almacén SQLite de Cursor y sus instantáneas normalizadas | Una respuesta del modo equipo aprobada explícitamente |
 | Llamadas a herramientas, salidas, razonamiento — toda la traza en bruto | Nada, en la ruta de incrustación incluida/local |
 | El índice SQLite y los vectores almacenados | |
@@ -588,6 +613,7 @@ retrasado — exactamente el fallo que de otro modo resulta invisible.
 | `Missing dependencies for SOCKS support` | Hay un proxy SOCKS configurado en el entorno, pero `PySocks` no está instalado en ese venv. |
 | `recent_sessions` muestra una marca de tiempo antigua | El indexador no ha terminado bien últimamente. Ejecuta `session-recall index` a mano y lee la salida. |
 | Cursor vive en un perfil personalizado | Define `SESSION_RECALL_CURSOR_DB=/path/to/User/globalStorage/state.vscdb`. |
+| Faltan sesiones de Antigravity | Revisa `~/.gemini/antigravity*/brain/<id>/.system_generated/logs/`; para otra ubicación define `SESSION_RECALL_ANTIGRAVITY_HOME`. |
 
 ## Desarrollo
 
@@ -621,8 +647,8 @@ Empieza por:
   un espacio vectorial compartido implica una ruta de incrustación compartida.
 - **Omitir la aprobación por contacto** — saltarse la aprobación por respuesta con los peers
   en los que confías plenamente; hoy cada respuesta se aprueba explícitamente.
-- **Más historiales** — transcripciones de otros agentes más allá de Claude Code, Codex y
-  Cursor.
+- **Más historiales** — transcripciones de otros agentes más allá de Claude Code, Codex,
+  Cursor y Antigravity.
 
 ## Contribuir
 

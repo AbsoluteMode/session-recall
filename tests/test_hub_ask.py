@@ -244,13 +244,13 @@ def test_remask_rewrites_what_was_stored_before_the_map_was_fixed(tmp_path):
                    f'{{"text":"pass {secret}"}}\n'.encode(), ledger)
     before = ledger.read("egor")[rel]
 
-    SecretMap.build({"servers/NETCUP_PASSWORD": secret},
+    SecretMap.build({"infra/SSH_PASSWORD": secret},
                     salt="s").save(hub.secrets_path)
     result = remask_all(hub)
 
     stored = storage.resolve(hub.transcripts, "egor", rel).read_text()
     assert result["files_rewritten"] == 1 and result["secrets_masked"] == 1
-    assert secret not in stored and "${servers/NETCUP_PASSWORD}" in stored
+    assert secret not in stored and "${infra/SSH_PASSWORD}" in stored
     # the ledger counts the CLIENT's bytes, which a rewrite does not change
     assert ledger.read("egor")[rel] == before
 

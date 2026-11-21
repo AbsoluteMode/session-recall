@@ -1,11 +1,11 @@
 {
   "name": "session-recall",
   "displayName": "Session Recall",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "minClientVersions": {
     "cursor": "2.5.0"
   },
-  "description": "Shared semantic recall over local Claude Code, Codex, and Cursor history, with durable deep navigation and guided setup.",
+  "description": "Shared semantic recall over local Claude Code, Codex, Cursor, and Antigravity history, with durable deep navigation and guided setup.",
   "author": {
     "name": "Max Butorin"
   },

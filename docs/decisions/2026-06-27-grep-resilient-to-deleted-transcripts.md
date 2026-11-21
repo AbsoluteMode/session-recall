@@ -9,11 +9,11 @@ global `grep` (without `session_id`) crashed with
 
 ```
 [Errno 2] No such file or directory:
-$HOME/.claude/projects/-Users-maxim/98688231-0c4e-471d-aec2-a4ee74efda4f.jsonl
+$HOME/.claude/projects/-Users-dev/98688231-0c4e-471d-aec2-a4ee74efda4f.jsonl
 ```
 
-Hypothesis in the feedback: the path is "broken/truncated" (`-Users-maxim` instead of
-`-Users-maxim-xyeta-trend-detection`), probably due to a space/special character in the session
+Hypothesis in the feedback: the path is "broken/truncated" (`-Users-dev` instead of
+`-Users-dev-scratch-analytics`), probably due to a space/special character in the session
 path. Feedback conclusion: targeted grep by `session_id` is fine, global is unreliable.
 
 ## Decision
@@ -39,7 +39,7 @@ drill-down on such a hit would return nothing).
 
 Diagnosis disproved the feedback hypothesis. Measurement against the real index:
 
-- `~/.claude/projects/-Users-maxim/` **exists** — it is a valid project dir for
+- `~/.claude/projects/-Users-dev/` **exists** — it is a valid project dir for
   sessions launched from home `$HOME` (23 `.jsonl`). The path is not truncated, the encoding
   is correct.
 - Of the **338** indexed `file_path` entries, exactly **one** is missing from disk — that very

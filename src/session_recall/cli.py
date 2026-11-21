@@ -8,6 +8,7 @@ from .rerank import make_reranker
 from .index import index_corpus
 from .retrieve import Recall
 from .timefmt import date_range_to_epoch
+from .transcripts import antigravity_transcript_files
 
 
 def _add_date_args(parser: argparse.ArgumentParser) -> None:
@@ -26,8 +27,14 @@ def _date_range(args, parser: argparse.ArgumentParser) -> tuple[int | None, int 
         parser.error(str(exc))
 
 
-_SOURCE_LABELS = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor",
-                  "metadocs": "meta docs"}
+_SOURCE_LABELS = {
+    "claude": "Claude Code",
+    "codex": "Codex",
+    "cursor": "Cursor",
+    "antigravity": "Antigravity",
+    "metadocs": "meta docs",
+}
+_SOURCE_CHOICES = ("claude", "codex", "cursor", "antigravity")
 _ZONE_MARKS = {"GREEN": "ok  ", "AMBER": "warn", "RED": "FAIL"}
 
 
@@ -41,9 +48,14 @@ def _run_health(store: Store) -> int:
         "codex": config.CODEX_SESSIONS,
         "cursor": config.CURSOR_DB,
     }
+    agy_dirs = config.antigravity_dirs()
+    existing_agy = next((d for d in agy_dirs if d.is_dir()), None)
+    if existing_agy is not None:
+        roots["antigravity"] = existing_agy
     transcripts = [p for root in (config.CLAUDE_PROJECTS, config.CODEX_SESSIONS,
                                   config.CODEX_ARCHIVED_SESSIONS)
                    if Path(root).is_dir() for p in Path(root).rglob("*.jsonl")]
+    transcripts.extend(antigravity_transcript_files(agy_dirs))
     source_timestamps: tuple[int | float, ...] = ()
     if Path(config.CURSOR_DB).is_file():
         from .cursor import CursorSchemaError, latest_activity
@@ -90,28 +102,28 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="session-recall")
     sub = parser.add_subparsers(dest="cmd", required=True)
     ip = sub.add_parser("index")
-    ip.add_argument("--source", choices=("all", "claude", "codex", "cursor"),
+    ip.add_argument("--source", choices=("all",) + _SOURCE_CHOICES,
                     default="all")
     sp = sub.add_parser("search")
     sp.add_argument("query")
     sp.add_argument("-k", type=int, default=10)
     sp.add_argument("--scope", help="cwd to scope results to (repo root)")
-    sp.add_argument("--source", choices=("claude", "codex", "cursor"))
+    sp.add_argument("--source", choices=_SOURCE_CHOICES)
     _add_date_args(sp)
     rp = sub.add_parser("recent")
     rp.add_argument("--scope")
     rp.add_argument("-n", type=int, default=10)
-    rp.add_argument("--source", choices=("claude", "codex", "cursor"))
+    rp.add_argument("--source", choices=_SOURCE_CHOICES)
     _add_date_args(rp)
     gp = sub.add_parser("grep")
     gp.add_argument("pattern")
     gp.add_argument("--scope")
     gp.add_argument("--session")
-    gp.add_argument("--source", choices=("claude", "codex", "cursor"))
+    gp.add_argument("--source", choices=_SOURCE_CHOICES)
     gp.add_argument("--limit", type=int, default=100)
     _add_date_args(gp)
     pp = sub.add_parser("prune")  # drop rows for transcripts deleted from disk
-    pp.add_argument("--source", choices=("claude", "codex", "cursor"))
+    pp.add_argument("--source", choices=_SOURCE_CHOICES)
     sub.add_parser("health")  # is recall actually working right now?
     # What the SessionStart hook calls. One command whose meaning follows the
     # install: keep the local index fresh, or push to the team hub. The hook
@@ -159,24 +171,27 @@ def main(argv=None):
         claude_root = config.CLAUDE_PROJECTS if args.source in {"all", "claude"} else None
         codex_roots = ((config.CODEX_SESSIONS, config.CODEX_ARCHIVED_SESSIONS)
                        if args.source in {"all", "codex"} else ())
+        antigravity_roots = (config.antigravity_dirs()
+                             if args.source in {"all", "antigravity"} else ())
         embedder = make_embedder()
-        n = index_corpus(
-            store,
-            embedder,
-            claude_root,
-            codex_dirs=codex_roots,
-        )
-        print(f"indexed {n} chunks from changed transcripts")
+        if claude_root is not None or codex_roots or antigravity_roots:
+            n = index_corpus(
+                store,
+                embedder,
+                claude_root,
+                codex_dirs=codex_roots,
+                antigravity_dirs=antigravity_roots,
+            )
+            print(f"indexed {n} chunks from changed transcripts")
         if args.source in {"all", "cursor"}:
             from .cursor import index_cursor
             try:
                 c = index_cursor(store, embedder)
             except Exception as exc:
                 # Cursor's private SQLite schema can change independently of
-                # us. Claude/Codex commits from the preceding stage remain
-                # valid, but the overall command is honestly unsuccessful and
-                # leaves the global vector-space marker mixed.
-                import sys
+                # us. Claude/Codex/Antigravity commits from the preceding stage
+                # remain valid, but the overall command is honestly unsuccessful
+                # and leaves the global vector-space marker mixed.
                 print(f"session-recall: Cursor indexing failed; other sources "
                       f"were kept ({type(exc).__name__}: {exc})", file=sys.stderr)
                 exit_code = 1

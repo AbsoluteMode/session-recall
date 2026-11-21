@@ -2,13 +2,13 @@
 
 The regex scanner in `share/scanner.py` guesses at FORMATS — it catches
 `sk-ant-…` because that shape is recognisable. It cannot catch
-`NETCUP_PASSWORD`, because a password has no shape. This module works the
+`SSH_PASSWORD`, because a password has no shape. This module works the
 other way round: everything the team keeps in Doppler is known by value, so a
 literal match is exact, has no false negatives for anything stored there, and
 replaces the hit with something more useful than `[REDACTED]` — the variable
 name it came from:
 
-    ssh root@1.2.3.4 hunter2xyzzy…      ->  ssh root@1.2.3.4 ${servers/NETCUP_PASSWORD}
+    ssh root@1.2.3.4 hunter2xyzzy…      ->  ssh root@1.2.3.4 ${infra/SSH_PASSWORD}
 
 A reader still learns which credential the session used, which is usually the
 part that matters when reading someone's history, and the value is gone.

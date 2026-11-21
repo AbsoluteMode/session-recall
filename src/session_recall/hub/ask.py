@@ -9,7 +9,7 @@ digest of the fragments it found. That is deliberately not an error path: an
 operator who has not wired a model yet should get the same evidence, just
 unwritten, rather than a broken feature.
 
-Attribution is part of the answer's value here — "Егор делал это в проекте X"
+Attribution is part of the answer's value here — "Алиса делала это в проекте X"
 is often the actual thing the asker needed — so sources carry the owner. What
 they do NOT carry is the transcript path: it names a directory on the server
 and helps nobody.

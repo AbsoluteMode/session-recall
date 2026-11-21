@@ -1,7 +1,7 @@
 {
   "name": "session-recall",
-  "version": "0.6.1",
-  "description": "Shared semantic recall over local Claude Code, Codex, and Cursor history, with durable deep navigation and guided setup.",
+  "version": "0.7.0",
+  "description": "Shared semantic recall over local Claude Code, Codex, Cursor, and Antigravity history, with durable deep navigation and guided setup.",
   "author": {
     "name": "Max Butorin"
   },
@@ -14,7 +14,8 @@
     "sessions",
     "claude-code",
     "codex",
-    "cursor"
+    "cursor",
+    "antigravity"
   ],
   "skills": "./skills/",
   "mcpServers": {
@@ -28,8 +29,8 @@
   },
   "interface": {
     "displayName": "Session Recall",
-    "shortDescription": "Recall work from Claude Code, Codex, and Cursor.",
-    "longDescription": "Search one local semantic index of your Claude Code, Codex, and Cursor sessions, then drill into the original conversational trace.",
+    "shortDescription": "Recall work from Claude Code, Codex, Cursor, and Antigravity.",
+    "longDescription": "Search one local semantic index of your Claude Code, Codex, Cursor, and Antigravity sessions, then drill into the original conversational trace.",
     "developerName": "Max Butorin",
     "category": "Productivity",
     "capabilities": [

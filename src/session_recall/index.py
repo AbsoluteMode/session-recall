@@ -8,7 +8,11 @@ from .store import Store
 from .embed import Embedder
 from .scope import project_label
 from .repos import REPO_SCAN_VERSION, RepoResolver, attributed_repos, scan_file
-from .transcripts import codex_file_header
+from .transcripts import (
+    antigravity_file_header,
+    antigravity_transcript_files,
+    codex_file_header,
+)
 
 def _embed_fp() -> str:
     # Which embedding space the vectors live in. Same-dim provider/model swaps
@@ -22,8 +26,8 @@ def _file_sig(path: Path, source: str = "claude") -> str:
     # either invalidates every file, so a changed extractor OR embedding model
     # triggers a clean re-extract/re-embed on the next run.
     prefix = f"{extractor_tag(source)}:{_embed_fp()}"
-    if source == "codex":
-        # Codex rollouts can move into the archive or be replaced. inode makes
+    if source in ("codex", "antigravity"):
+        # Rollouts/transcripts can move or be replaced atomically. inode makes
         # same-size/same-second replacements visible; path moves still reuse
         # vectors by stable session id.
         return f"{prefix}:{st.st_ino}:{int(st.st_mtime)}:{st.st_size}"
@@ -61,6 +65,11 @@ def _codex_files(codex_dirs: Iterable[Path]):
                 continue
             seen.add(key)
             yield jsonl, "codex", ""
+
+
+def _antigravity_files(antigravity_dirs: Iterable[Path]):
+    for jsonl in antigravity_transcript_files(antigravity_dirs):
+        yield jsonl, "antigravity", ""
 
 
 def _scan_sessions(store: Store, path: str, source: str, sig: str,
@@ -120,13 +129,15 @@ def _roots_safe_to_prune(store: Store, roots: Iterable[Path], source: str) -> bo
 
 def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
                  codex_dirs: Iterable[Path] | None = None,
-                 resolver: RepoResolver | None = None) -> int:
-    """Incrementally index Claude Code plus optional Codex transcript roots.
+                 resolver: RepoResolver | None = None,
+                 antigravity_dirs: Iterable[Path] | None = None) -> int:
+    """Incrementally index Claude Code plus optional Codex and Antigravity roots.
 
-    The fourth argument is optional to preserve the original Claude-only Python
-    API.  The CLI passes both Codex active and archive roots by default.
+    Optional root arguments preserve the original Claude-only Python API.
+    The CLI passes all configured roots by default.
     """
     codex_roots = tuple(codex_dirs or ())
+    antigravity_roots = tuple(antigravity_dirs or ())
     selected_sources: set[str] = set()
     prunable_sources: set[str] = set()
     if projects_dir is not None:
@@ -137,6 +148,10 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
         selected_sources.add("codex")
         if _roots_safe_to_prune(store, codex_roots, "codex"):
             prunable_sources.add("codex")
+    if antigravity_roots:
+        selected_sources.add("antigravity")
+        if _roots_safe_to_prune(store, antigravity_roots, "antigravity"):
+            prunable_sources.add("antigravity")
     # Grandfather pre-fingerprint sigs (v{N}:mtime:size — exactly 3 parts): their
     # vectors were produced by the then-configured provider, so stamping the
     # CURRENT fingerprint keeps them valid without a wholesale re-embed of the
@@ -155,18 +170,26 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
     failed_sources: set[str] = set()
     jobs = list(_claude_files(projects_dir) or ())
     jobs.extend(_codex_files(codex_roots))
+    jobs.extend(_antigravity_files(antigravity_roots))
     resolver = resolver or RepoResolver()
     for jsonl, source, project in jobs:
         # One transaction per file: delete + re-add + marker commit together.
         # _file_sig and header reads stay INSIDE this isolation for delete races,
         # broken symlinks, or partially-written live rollouts.
         try:
+            meta = None
             if source == "codex":
                 meta = codex_file_header(jsonl)
                 if meta.is_sidechain:
                     _forget_file(store, str(jsonl))
                     continue
                 project = project_label(meta.cwd) or "codex"
+            elif source == "antigravity":
+                meta = antigravity_file_header(jsonl)
+                if meta.is_sidechain:
+                    _forget_file(store, str(jsonl))
+                    continue
+                project = project_label(meta.cwd) or "antigravity"
             sig = _file_sig(jsonl, source)
             if store.is_indexed(str(jsonl), sig):
                 if store.repo_scan_sig(str(jsonl)) != _scan_sig(sig):
@@ -182,11 +205,11 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
             same_space = _sig_embed_fp(stored) == _embed_fp()
             cached = store.embeddings_by_hash(str(jsonl)) if same_space else {}
             # Codex moves completed rollouts from sessions/ to
-            # archived_sessions/. Reuse the old path's vectors by stable thread
-            # id so archiving does not resend the whole conversation.
-            if source == "codex" and not stored and not cached:
+            # archived_sessions/; Antigravity may promote transcript.jsonl to
+            # transcript_full.jsonl. Reuse vectors by stable session id.
+            if source in ("codex", "antigravity") and meta is not None and not stored and not cached:
                 cached = store.embeddings_by_session(
-                    meta.session_id, source="codex", embed_fp=_embed_fp())
+                    meta.session_id, source=source, embed_fp=_embed_fp())
             store.delete_file(str(jsonl))
             chunks = extract_file(str(jsonl), project=project, source=source)
             if chunks:
@@ -221,6 +244,22 @@ def index_corpus(store: Store, embedder: Embedder, projects_dir: Path | None,
     # hole; the next clean run reconciles it.
     for source in sorted(prunable_sources - failed_sources):
         store.prune_deleted(source=source)
+    if "antigravity" in prunable_sources - failed_sources:
+        # WHY: docs/decisions/2026-11-21-antigravity-clean-surface.md
+        # One conversation can have several files on disk at once: the compact
+        # transcript.jsonl next to transcript_full.jsonl, or the same id under
+        # two app surfaces. Discovery picks one canonical file; when that pick
+        # moves, the old path still EXISTS, so prune_deleted keeps it and the
+        # session shows up twice. Drop every indexed path discovery no longer
+        # chose — its vectors were already reused by session id above.
+        canonical = {str(path) for path, source, _ in jobs if source == "antigravity"}
+        scanned = [Path(root).expanduser().absolute() for root in antigravity_roots]
+        for (path,) in store.db.execute(
+                "SELECT path FROM indexed_files WHERE source = 'antigravity'").fetchall():
+            under_scan = any(Path(path).expanduser().absolute().is_relative_to(root)
+                             for root in scanned)
+            if under_scan and path not in canonical:
+                _forget_file(store, path)
     if failed:
         print(f"session-recall: {len(failed)} file(s) failed to index (will retry "
               f"next run):\n  " + "\n  ".join(failed[:10]), file=sys.stderr)

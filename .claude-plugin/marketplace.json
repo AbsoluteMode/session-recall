@@ -1,6 +1,6 @@
 {
   "name": "session-recall-marketplace",
-  "description": "Local shared-memory plugin for Claude Code, Codex, and Cursor sessions.",
+  "description": "Local shared-memory plugin for Claude Code, Codex, Cursor, and Antigravity sessions.",
   "owner": { "name": "Max Butorin" },
   "plugins": [
     {

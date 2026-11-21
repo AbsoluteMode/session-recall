@@ -12,3 +12,6 @@ import os
 
 os.environ["SESSION_RECALL_EMBED"] = "voyage"
 os.environ.pop("SESSION_RECALL_LANG", None)
+os.environ.setdefault(
+    "SESSION_RECALL_ANTIGRAVITY_HOME", "/nonexistent/session-recall-test-antigravity"
+)

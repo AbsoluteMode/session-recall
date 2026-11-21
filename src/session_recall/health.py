@@ -8,7 +8,7 @@ returning plausible keyword hits the whole time. Nothing in the tool said a word
 Each dimension is a small check returning the same shape, so `session-recall health`
 is a table and not a wall of prose. Every failing dimension carries a hint — a symptom
 without a next step just moves the confusion.
-WHY: docs/decisions/2026-07-26-voyage-403-egress-via-netcup.md
+WHY: docs/decisions/2026-07-26-voyage-403-egress-and-degraded-flag.md
 """
 from __future__ import annotations
 

@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from . import config
+from .transcripts import antigravity_transcript_files
 
 _PROMPT = ("Interaction language — steers the bundled embedding model "
            "[en/zh/ru/…, Enter = multilingual]: ")
@@ -58,6 +59,12 @@ def _transcript_footprint() -> tuple[int, int]:
                 size += p.stat().st_size
             except OSError:
                 pass
+    for p in antigravity_transcript_files(config.antigravity_dirs()):
+        files += 1
+        try:
+            size += p.stat().st_size
+        except OSError:
+            pass
     cursor_db = Path(config.CURSOR_DB)
     if cursor_db.is_file():
         files += 1
